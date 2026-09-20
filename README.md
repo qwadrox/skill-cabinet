@@ -17,7 +17,7 @@ If you use Claude Code, Codex, or another skill-based agent, Skill Cabinet gives
 AI agent skills are often scattered across several hidden folders. Skill Cabinet makes them visible and manageable:
 
 - Keep all your skills in one library.
-- Import existing skill folders that contain a `SKILL.md` file.
+- Import existing skill folders that contain a `SKILL.md` file, or select skills from an HTTPS/SSH Git repository.
 - Group related skills into collections such as *Writing*, *Research*, or *Development*.
 - Turn collections or individual skills on and off for each agent.
 - Keep agent skill folders synchronized with links managed by the cabinet.
@@ -77,13 +77,14 @@ Skill Cabinet stores its data locally:
 ~/.skill-cabinet/skills/          imported skills
 ~/.skill-cabinet/collections.json collections and membership
 ~/.skill-cabinet/deployment.json  agents and assignments
+~/.skill-cabinet/git_sources.json tracked Git repository sources
 ```
 
 The app does not upload your skills. It uses macOS file links to make enabled skills available to your agents.
 
 ## Status
 
-Skill Cabinet is an early macOS release. Remote skill sources and automatic updates are planned for a future version.
+Skill Cabinet is an early macOS release. Git repository import is available for shallow HTTPS/SSH checkouts; automatic upstream updates are planned for a future version.
 
 ## License
 

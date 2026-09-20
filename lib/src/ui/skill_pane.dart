@@ -13,10 +13,11 @@ import 'widgets.dart';
 // The content area: the notice, the skill list for the selected view, and
 // a status bar with the store's location.
 class SkillPane extends StatelessWidget {
-  const SkillPane({super.key, required this.scroll, required this.onImport});
+  const SkillPane({super.key, required this.scroll, required this.onImport, required this.onImportGit});
 
   final ScrollController scroll;
   final VoidCallback onImport;
+  final VoidCallback onImportGit;
 
   @override
   Widget build(BuildContext context) {
@@ -61,10 +62,21 @@ class SkillPane extends StatelessWidget {
               Text(controller.library.root, style: context.mono),
             ],
           ),
-          action: PushButton(
-            controlSize: ControlSize.large,
-            onPressed: onImport,
-            child: const Text('Import Skill Folder…'),
+          action: Column(
+            children: [
+              PushButton(
+                controlSize: ControlSize.large,
+                onPressed: onImport,
+                child: const Text('Import Skill Folder…'),
+              ),
+              const SizedBox(height: 8),
+              PushButton(
+                controlSize: ControlSize.large,
+                secondary: true,
+                onPressed: onImportGit,
+                child: const Text('Import from Git…'),
+              ),
+            ],
           ),
         ),
         ..._health(context, controller),

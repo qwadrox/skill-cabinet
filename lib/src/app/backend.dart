@@ -2,11 +2,13 @@ import 'dart:isolate';
 
 import '../domain/collections.dart';
 import '../domain/deployment.dart';
+import '../domain/git_import.dart';
 import '../domain/library.dart';
 import '../services/cabinet_paths.dart';
 import '../services/collections_service.dart';
 import '../services/deployment_service.dart';
 import '../services/library_service.dart';
+import '../services/git_import_service.dart';
 
 // The services, run off the UI isolate. Holds nothing but the paths, so
 // every closure below is cheap to send. Calls are serialized: each
@@ -19,10 +21,17 @@ class CabinetBackend {
   Future<void> _tail = Future.value();
 
   LibraryService get _library => LibraryService(paths);
+  GitImportService get _git => GitImportService(paths);
   CollectionsService get _collections => CollectionsService(paths);
   DeploymentService get _deployment => DeploymentService(paths);
 
   Future<T> _run<T>(T Function() op) {
+    final result = _tail.then((_) => Isolate.run(op));
+    _tail = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  Future<T> _runAsync<T>(Future<T> Function() op) {
     final result = _tail.then((_) => Isolate.run(op));
     _tail = result.then((_) {}, onError: (_) {});
     return result;
@@ -42,6 +51,26 @@ class CabinetBackend {
   Future<LibraryImportResult> importSkills(List<String> paths, {required bool move}) {
     final s = _library;
     return _run(() => s.importSkills(paths, move: move));
+  }
+
+  Future<GitImportPreview> previewGit(String url) {
+    final service = _git;
+    return _runAsync(() => service.preview(url));
+  }
+
+  Future<GitImportResult> importGit(GitImportPreview preview, List<String> paths) {
+    final service = _git;
+    return _run(() => service.importSelected(preview, paths));
+  }
+
+  Future<void> discardGitPreview(GitImportPreview preview) {
+    final service = _git;
+    return _run(() => service.discard(preview));
+  }
+
+  Future<void> removeGitSource(String skillName) {
+    final service = _git;
+    return _run(() => service.removeSource(skillName));
   }
 
   Future<LibraryDeleteResult> deleteSkill(String name) {

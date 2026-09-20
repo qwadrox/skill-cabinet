@@ -1,0 +1,333 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
+import '../domain/frontmatter.dart';
+import '../domain/git_import.dart';
+import '../domain/library.dart';
+import 'cabinet_paths.dart';
+import 'fs_util.dart';
+import 'library_service.dart';
+
+class GitImportException implements Exception {
+  const GitImportException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+// A shallow checkout is the remote adapter: discovery and import work for any
+// ordinary Git server and need no host-specific API or token.
+class GitImportService {
+  const GitImportService(this.paths);
+
+  static const _git = '/usr/bin/git';
+  static const _tempPrefix = 'skill-cabinet-git-';
+  static const maxCandidates = 200;
+  static const maxFilesPerSkill = 500;
+  static const maxBytesPerSkill = 50 * 1024 * 1024;
+
+  final CabinetPaths paths;
+
+  Future<GitImportPreview> preview(String rawUrl) async {
+    final sourceUrl = validateRemoteUrl(rawUrl);
+    final session = Directory.systemTemp.createTempSync(_tempPrefix);
+    final checkout = p.join(session.path, 'repository');
+    try {
+      final clone = await Process.run(
+        _git,
+        [
+          '-c',
+          'http.lowSpeedLimit=1000',
+          '-c',
+          'http.lowSpeedTime=30',
+          'clone',
+          '--depth',
+          '1',
+          '--no-tags',
+          '--',
+          sourceUrl,
+          checkout,
+        ],
+        environment: const {'GIT_TERMINAL_PROMPT': '0'},
+      );
+      if (clone.exitCode != 0) throw GitImportException(_cloneError(clone.stderr));
+
+      final revision = _gitValue(checkout, ['rev-parse', 'HEAD']);
+      final branch = _gitValue(checkout, ['branch', '--show-current']);
+      final repository = _repositoryName(sourceUrl);
+      final found = findSkillDirs(checkout, limit: maxCandidates);
+      final candidates = <GitSkillCandidate>[];
+      for (final path in found) {
+        final relative = p.equals(path, checkout) ? '' : p.relative(path, from: checkout).replaceAll('\\', '/');
+        final name = relative.isEmpty ? repository : p.basename(path);
+        candidates.add(
+          GitSkillCandidate(
+            name: name,
+            repositoryPath: relative,
+            localPath: path,
+            description: _descriptionAt(path),
+            duplicate: lexists(p.join(paths.storeDir, name)),
+            blockedReason: _blockedReason(path),
+          ),
+        );
+      }
+      candidates.sort((a, b) => a.repositoryPath.compareTo(b.repositoryPath));
+
+      final names = <String, int>{};
+      for (final candidate in candidates) {
+        names[candidate.name] = (names[candidate.name] ?? 0) + 1;
+      }
+      final normalized = [
+        for (final candidate in candidates)
+          names[candidate.name]! > 1
+              ? GitSkillCandidate(
+                  name: candidate.name,
+                  repositoryPath: candidate.repositoryPath,
+                  localPath: candidate.localPath,
+                  description: candidate.description,
+                  duplicate: candidate.duplicate,
+                  blockedReason: 'Another folder has the same skill name',
+                )
+              : candidate,
+      ];
+
+      return GitImportPreview(
+        sourceUrl: sourceUrl,
+        repository: repository,
+        ref: branch.isEmpty ? 'HEAD' : branch,
+        revision: revision,
+        checkoutPath: checkout,
+        candidates: normalized,
+      );
+    } catch (_) {
+      if (session.existsSync()) session.deleteSync(recursive: true);
+      rethrow;
+    }
+  }
+
+  GitImportResult importSelected(GitImportPreview preview, Iterable<String> pathsToImport) {
+    final session = _validatedSession(preview.checkoutPath);
+    final selectedPaths = pathsToImport.toSet();
+    final selected = preview.candidates.where(
+      (candidate) => selectedPaths.contains(candidate.repositoryPath) && candidate.selectable,
+    );
+    if (selected.isEmpty) {
+      discard(preview);
+      return GitImportResult(LibraryImportResult(LibraryService(paths).scan()));
+    }
+
+    final staging = Directory(p.join(session.path, 'selected'))..createSync();
+    try {
+      final staged = <String>[];
+      for (final candidate in selected) {
+        final source = _validatedCandidate(preview.checkoutPath, candidate.localPath);
+        final destination = p.join(staging.path, candidate.name);
+        _copyTreeSafe(source, destination);
+        staged.add(destination);
+      }
+
+      final result = LibraryService(paths).importSkills(staged, move: true);
+      var saved = 0;
+      if (result.imported.isNotEmpty) {
+        final records = <String, GitSourceRecord>{
+          ..._readSources(),
+          for (final candidate in selected)
+            if (result.imported.contains(candidate.name))
+              candidate.name: GitSourceRecord(
+                skillName: candidate.name,
+                sourceUrl: preview.sourceUrl,
+                ref: preview.ref,
+                repositoryPath: candidate.repositoryPath,
+                revision: preview.revision,
+              ),
+        };
+        try {
+          _writeSources(records);
+          saved = result.imported.length;
+        } catch (error) {
+          final notice = result.snapshot.notice.isEmpty
+              ? 'Imported, but Git tracking could not be saved: $error'
+              : '${result.snapshot.notice} · Git tracking could not be saved: $error';
+          return GitImportResult(LibraryImportResult(_withNotice(result.snapshot, notice), imported: result.imported));
+        }
+      }
+      return GitImportResult(result, sourcesSaved: saved);
+    } finally {
+      if (session.existsSync()) session.deleteSync(recursive: true);
+    }
+  }
+
+  void discard(GitImportPreview preview) {
+    final session = _validatedSession(preview.checkoutPath);
+    if (session.existsSync()) session.deleteSync(recursive: true);
+  }
+
+  void removeSource(String skillName) {
+    final records = _readSources();
+    if (records.remove(skillName) != null) _writeSources(records);
+  }
+
+  String validateRemoteUrl(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty || value.startsWith('-') || value.contains(RegExp(r'[\r\n\x00]'))) {
+      throw const GitImportException('Paste a Git repository URL');
+    }
+    if (RegExp(r'^git@[^:/\s]+:[^\s]+$').hasMatch(value)) return value;
+
+    final uri = Uri.tryParse(value);
+    if (uri == null || !const {'https', 'ssh'}.contains(uri.scheme) || uri.host.isEmpty) {
+      throw const GitImportException('Use an HTTPS or SSH Git repository URL');
+    }
+    if (uri.query.isNotEmpty || uri.fragment.isNotEmpty) {
+      throw const GitImportException('The repository URL must not contain a query or fragment');
+    }
+    if (uri.userInfo.contains(':')) {
+      throw const GitImportException('Do not put a password or token in the repository URL');
+    }
+    if (uri.pathSegments.isEmpty || uri.pathSegments.every((segment) => segment.isEmpty)) {
+      throw const GitImportException('The repository URL has no repository path');
+    }
+    if (uri.host.toLowerCase() == 'github.com' && uri.pathSegments.contains('tree')) {
+      throw const GitImportException('Paste the repository URL, not a GitHub folder page');
+    }
+    return value;
+  }
+
+  Directory _validatedSession(String checkoutPath) {
+    final checkout = Directory(checkoutPath);
+    if (!checkout.existsSync()) throw const GitImportException('The Git preview expired. Try again.');
+    final canonicalCheckout = checkout.resolveSymbolicLinksSync();
+    final session = Directory(p.dirname(canonicalCheckout));
+    final temp = Directory.systemTemp.resolveSymbolicLinksSync();
+    if (!p.isWithin(temp, canonicalCheckout) || !p.basename(session.path).startsWith(_tempPrefix)) {
+      throw const GitImportException('Invalid Git preview directory');
+    }
+    return session;
+  }
+
+  String _validatedCandidate(String checkoutPath, String candidatePath) {
+    final checkout = Directory(checkoutPath).resolveSymbolicLinksSync();
+    final candidate = Directory(candidatePath).resolveSymbolicLinksSync();
+    if (candidate != checkout && !p.isWithin(checkout, candidate)) {
+      throw const GitImportException('A selected skill escaped the repository checkout');
+    }
+    if (!isSkillDir(candidate)) throw const GitImportException('A selected folder is no longer a skill');
+    return candidate;
+  }
+
+  void _copyTreeSafe(String source, String destination) {
+    var files = 0;
+    var bytes = 0;
+
+    void copy(String from, String to) {
+      Directory(to).createSync(recursive: true);
+      for (final entity in Directory(from).listSync(followLinks: false)) {
+        final name = p.basename(entity.path);
+        if (name == '.git') continue;
+        final target = p.join(to, name);
+        switch (FileSystemEntity.typeSync(entity.path, followLinks: false)) {
+          case FileSystemEntityType.directory:
+            copy(entity.path, target);
+          case FileSystemEntityType.file:
+            files++;
+            bytes += File(entity.path).lengthSync();
+            if (files > maxFilesPerSkill) throw const GitImportException('A selected skill contains too many files');
+            if (bytes > maxBytesPerSkill) throw const GitImportException('A selected skill is too large to import');
+            File(entity.path).copySync(target);
+          case FileSystemEntityType.link:
+            throw const GitImportException('Symlinks inside skills are not supported');
+          case FileSystemEntityType.notFound:
+          case FileSystemEntityType.pipe:
+          case FileSystemEntityType.unixDomainSock:
+          default:
+            throw const GitImportException('A selected skill contains an unsupported file');
+        }
+      }
+    }
+
+    copy(source, destination);
+  }
+
+  String? _blockedReason(String directory) {
+    var files = 0;
+    var bytes = 0;
+    try {
+      for (final entity in Directory(directory).listSync(recursive: true, followLinks: false)) {
+        if (p.basename(entity.path) == '.git' || entity.path.contains('${p.separator}.git${p.separator}')) continue;
+        final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
+        if (type == FileSystemEntityType.link) return 'Symlinks are not supported';
+        if (type == FileSystemEntityType.file) {
+          files++;
+          bytes += File(entity.path).lengthSync();
+          if (files > maxFilesPerSkill) return 'Too many files';
+          if (bytes > maxBytesPerSkill) return 'Skill is larger than 50 MB';
+        }
+      }
+      return null;
+    } catch (_) {
+      return 'Could not inspect this folder';
+    }
+  }
+
+  String _gitValue(String checkout, List<String> arguments) {
+    final result = Process.runSync(_git, ['-C', checkout, ...arguments]);
+    if (result.exitCode != 0) throw GitImportException('Could not inspect the cloned repository: ${result.stderr}');
+    return result.stdout.toString().trim();
+  }
+
+  String _descriptionAt(String directory) {
+    try {
+      return splitFrontmatter(File(p.join(directory, 'SKILL.md')).readAsStringSync()).field('description');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  String _repositoryName(String sourceUrl) {
+    final path = sourceUrl.startsWith('git@')
+        ? sourceUrl.substring(sourceUrl.indexOf(':') + 1)
+        : Uri.parse(sourceUrl).path;
+    final name = p.posix.basename(path.replaceFirst(RegExp(r'/$'), ''));
+    return name.endsWith('.git') ? name.substring(0, name.length - 4) : name;
+  }
+
+  String _cloneError(Object stderr) {
+    final message = stderr.toString().trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (message.contains('Authentication failed') ||
+        message.contains('Permission denied') ||
+        message.contains('could not read Username')) {
+      return 'Git authentication failed. Check your existing Git credentials or SSH key.';
+    }
+    if (message.contains('not found') || message.contains('does not exist')) {
+      return 'The Git repository was not found, or you do not have access.';
+    }
+    return message.isEmpty ? 'Git could not clone the repository' : 'Git clone failed: $message';
+  }
+
+  Map<String, GitSourceRecord> _readSources() {
+    Object? value = readJson(paths.gitSourcesFile);
+    value ??= readJson(paths.githubSourcesFile);
+    if (value is! Map) return {};
+    final records = <String, GitSourceRecord>{};
+    for (final entry in value.entries) {
+      final record = GitSourceRecord.fromJson(entry.value);
+      if (record != null) records[entry.key.toString()] = record;
+    }
+    return records;
+  }
+
+  void _writeSources(Map<String, GitSourceRecord> records) {
+    writeJsonAtomic(paths.gitSourcesFile, {for (final entry in records.entries) entry.key: entry.value.toJson()});
+  }
+
+  LibrarySnapshot _withNotice(LibrarySnapshot snapshot, String notice) => LibrarySnapshot(
+    root: snapshot.root,
+    rootPath: snapshot.rootPath,
+    skills: snapshot.skills,
+    issues: snapshot.issues,
+    notice: notice,
+  );
+}

@@ -10,6 +10,7 @@ import '../app/rows.dart';
 import 'agents_sheet.dart';
 import 'dialogs.dart';
 import 'import_sheet.dart';
+import 'git_import_sheet.dart';
 import 'preview_pane.dart';
 import 'scope.dart';
 import 'sidebar.dart';
@@ -79,6 +80,23 @@ class _CabinetShellState extends State<CabinetShell> {
     await controller.importSkills(choice.paths, move: choice.move);
   }
 
+  Future<void> _importGit() async {
+    final url = await showGitUrlSheet(context);
+    if (!mounted || url == null) return;
+    final preview = await _controller.previewGit(url);
+    if (preview == null || preview.isEmpty) return;
+    if (!mounted) {
+      await _controller.discardGitPreview(preview);
+      return;
+    }
+    final choice = await showGitImportSheet(context, preview);
+    if (!mounted || choice == null || choice.repositoryPaths.isEmpty) {
+      await _controller.discardGitPreview(preview);
+      return;
+    }
+    await _controller.importGit(preview, choice.repositoryPaths);
+  }
+
   void _find() {
     final field = _controller.searchField;
     _searchFocus.requestFocus();
@@ -114,6 +132,7 @@ class _CabinetShellState extends State<CabinetShell> {
                   shortcut: const SingleActivator(LogicalKeyboardKey.keyO, meta: true),
                   onSelected: _pickImport,
                 ),
+                PlatformMenuItem(label: 'Import from Git…', onSelected: _importGit),
                 PlatformMenuItem(label: 'Open Store in Finder', onSelected: controller.openStore),
               ],
             ),
@@ -169,7 +188,8 @@ class _CabinetShellState extends State<CabinetShell> {
                 children: [
                   ContentArea(
                     minWidth: 420,
-                    builder: (context, scroll) => SkillPane(scroll: scroll, onImport: _pickImport),
+                    builder: (context, scroll) =>
+                        SkillPane(scroll: scroll, onImport: _pickImport, onImportGit: _importGit),
                   ),
                   if (controller.previewName != null)
                     // noScrollBar: the pane's own scrollbar would span the
@@ -238,6 +258,13 @@ class _CabinetShellState extends State<CabinetShell> {
           showLabel: false,
           tooltipMessage: 'Import a skill folder (⌘O)',
           onPressed: _pickImport,
+        ),
+        ToolBarIconButton(
+          label: 'Git',
+          icon: const MacosIcon(CupertinoIcons.cloud_download),
+          showLabel: false,
+          tooltipMessage: 'Import skills from a Git repository',
+          onPressed: _importGit,
         ),
         ToolBarIconButton(
           label: 'Open Store',

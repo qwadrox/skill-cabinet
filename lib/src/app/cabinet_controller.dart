@@ -12,6 +12,7 @@ import 'package:path/path.dart' as p;
 
 import '../domain/collections.dart';
 import '../domain/deployment.dart';
+import '../domain/git_import.dart';
 import '../domain/library.dart';
 import '../services/cabinet_paths.dart';
 import 'backend.dart';
@@ -233,6 +234,45 @@ class CabinetController extends ChangeNotifier {
   // other skill in the library.
   Future<void> importForeign(ForeignSkill skill) => importSkills([skill.path], move: true);
 
+  Future<GitImportPreview?> previewGit(String url) async {
+    _clearNotice();
+    notice = 'Cloning repository…';
+    notifyListeners();
+    try {
+      final preview = await _backend.previewGit(url);
+      if (preview.isEmpty) {
+        await _backend.discardGitPreview(preview);
+        notice = 'No skill folder (a folder with a SKILL.md) found in that Git repository';
+        notifyListeners();
+      } else {
+        _clearNotice();
+      }
+      return preview;
+    } catch (e) {
+      _failed(e);
+      return null;
+    }
+  }
+
+  Future<void> importGit(GitImportPreview preview, Iterable<String> paths) async {
+    _clearNotice();
+    try {
+      final result = await _backend.importGit(preview, paths.toList());
+      _libraryLoaded(result.library.snapshot);
+    } catch (e) {
+      _failed(e);
+    }
+  }
+
+  Future<void> discardGitPreview(GitImportPreview preview) async {
+    try {
+      await _backend.discardGitPreview(preview);
+    } catch (_) {
+      // The checkout lives under the system temp directory and is harmless if
+      // it was already removed or the OS cleans it up later.
+    }
+  }
+
   Future<void> _imported(Future<LibraryImportResult> pending) async {
     try {
       _libraryLoaded((await pending).snapshot);
@@ -248,6 +288,11 @@ class CabinetController extends ChangeNotifier {
       _libraryLoaded(result.snapshot);
       final deleted = result.deleted;
       if (deleted == null) return;
+      try {
+        await _backend.removeGitSource(deleted);
+      } catch (e) {
+        _noticed('Skill deleted, but Git tracking could not be cleared: $e');
+      }
       // The folder is gone: drop the name from every skill set and agent,
       // which also removes its now-dangling agent links.
       await Future.wait([
