@@ -184,7 +184,10 @@ class FilterPill extends StatelessWidget {
         children: [
           MacosIcon(active ? CupertinoIcons.checkmark_circle_fill : CupertinoIcons.circle, size: 12, color: tint),
           const SizedBox(width: 6),
-          Text(label, style: context.caption.copyWith(color: tint, fontWeight: FontWeight.w500)),
+          Text(
+            label,
+            style: context.caption.copyWith(color: tint, fontWeight: FontWeight.w500),
+          ),
           if (count != null) ...[
             const SizedBox(width: 6),
             Text('$count', style: context.caption.copyWith(color: tint.withValues(alpha: 0.7))),
@@ -313,5 +316,21 @@ class EmptyState extends StatelessWidget {
         if (action != null) ...[const SizedBox(height: 16), action!],
       ],
     ),
+  );
+}
+
+// A destructive push button. macos_ui's PushButton takes a `color` but only
+// uses it for the label, painting the fill from the theme's accent, so the
+// red has to come from a theme override.
+class DangerButton extends StatelessWidget {
+  const DangerButton({super.key, required this.label, required this.onPressed});
+
+  final String label;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => MacosTheme(
+    data: context.macos.copyWith(accentColor: AccentColor.red),
+    child: PushButton(controlSize: ControlSize.large, onPressed: onPressed, child: Text(label)),
   );
 }

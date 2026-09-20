@@ -10,8 +10,7 @@ import 'widgets.dart';
 
 Future<void> showAgentsSheet(BuildContext context) => showAppModal<void>(
   context: context,
-  builder: (_) =>
-      const MacosSheet(insetPadding: EdgeInsets.symmetric(horizontal: 140, vertical: 60), child: _AgentsSheet()),
+  builder: (_) => const AppDialogCard(width: 760, maxHeight: 620, child: _AgentsSheet()),
 );
 
 // Added agents on top (on/off switch, edit its folder, remove), then the
@@ -46,14 +45,15 @@ class _AgentsSheetState extends State<_AgentsSheet> {
     final catalog = controller.deployment.catalog.where((a) => _matches(a.label, a.path)).toList();
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 12),
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Agents', style: context.macos.typography.title2.copyWith(fontWeight: FontWeight.w600)),
+              Text('Agents', style: context.macos.typography.headline.copyWith(fontWeight: FontWeight.w700)),
               const SizedBox(height: 4),
               Text(
                 'Skills are linked into each agent’s skills folder. Turn an agent off to unlink everything '
@@ -72,9 +72,10 @@ class _AgentsSheetState extends State<_AgentsSheet> {
           ),
         ),
         Container(height: 1, color: context.separator),
-        Expanded(
+        Flexible(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
             children: [
               SectionLabel('YOUR AGENTS · ${controller.deployment.agents.length}'),
               if (controller.deployment.agents.isEmpty)
@@ -121,30 +122,26 @@ class _AgentsSheetState extends State<_AgentsSheet> {
             ],
           ),
         ),
-        Container(height: 1, color: context.separator),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          child: Row(
-            children: [
-              if (controller.notice.isNotEmpty)
-                Expanded(
-                  child: Text(
-                    controller.notice,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: context.caption.copyWith(color: context.resolve(MacosColors.systemOrangeColor)),
-                  ),
-                )
-              else
-                const Spacer(),
-              const SizedBox(width: 12),
-              PushButton(
-                controlSize: ControlSize.large,
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Done'),
-              ),
-            ],
-          ),
+        AppDialogActions(
+          children: [
+            if (controller.notice.isNotEmpty)
+              Expanded(
+                child: Text(
+                  controller.notice,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.caption.copyWith(color: context.resolve(MacosColors.systemOrangeColor)),
+                ),
+              )
+            else
+              const Spacer(),
+            const SizedBox(width: 12),
+            PushButton(
+              controlSize: ControlSize.large,
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Done'),
+            ),
+          ],
         ),
       ],
     );

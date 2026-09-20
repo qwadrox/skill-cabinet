@@ -5,6 +5,7 @@
 // leaves every set and agent), the controller reads one slice and commands another
 // service. Services never call each other.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -34,6 +35,7 @@ class CabinetController extends ChangeNotifier {
   final CabinetBackend _backend;
 
   LibrarySnapshot library = LibrarySnapshot.empty;
+  Map<String, GitSourceRecord> gitSources = const {};
   CollectionsSnapshot collections = CollectionsSnapshot.empty;
   DeploymentSnapshot deployment = DeploymentSnapshot.empty;
   bool loaded = false;
@@ -55,6 +57,7 @@ class CabinetController extends ChangeNotifier {
   String? previewName;
   SkillPreview? preview;
   String notice = '';
+  bool checkingGitUpdates = false;
 
   String get search => searchField.text;
 
@@ -72,6 +75,7 @@ class CabinetController extends ChangeNotifier {
     try {
       await Future.wait([
         _backend.scan().then(_libraryLoaded),
+        _backend.gitSources().then(_gitSourcesLoaded),
         _backend.listSets().then(_collectionsLoaded),
         _backend.sync().then(_deploymentLoaded),
         if (previewName != null) _backend.preview(previewName!).then(_previewLoaded),
@@ -81,6 +85,7 @@ class CabinetController extends ChangeNotifier {
     }
     loaded = true;
     notifyListeners();
+    unawaited(checkGitUpdates(force: false, quiet: true));
   }
 
   // Re-reads everything, the previewed SKILL.md included (it may have
@@ -106,6 +111,11 @@ class CabinetController extends ChangeNotifier {
     if (_selectedSet != null && snapshot.named(_selectedSet!) == null) _selectedSet = null;
     expandedSets.retainWhere((name) => snapshot.named(name) != null);
     _noticed(snapshot.notice);
+    notifyListeners();
+  }
+
+  void _gitSourcesLoaded(Map<String, GitSourceRecord> sources) {
+    gitSources = sources;
     notifyListeners();
   }
 
@@ -234,23 +244,19 @@ class CabinetController extends ChangeNotifier {
   // other skill in the library.
   Future<void> importForeign(ForeignSkill skill) => importSkills([skill.path], move: true);
 
-  Future<GitImportPreview?> previewGit(String url) async {
+  // The clone runs while the URL sheet is still open, so what went wrong
+  // belongs to that sheet, not to the pane's notice banner.
+  Future<GitPreviewOutcome> previewGit(String url) async {
     _clearNotice();
-    notice = 'Cloning repository…';
-    notifyListeners();
     try {
       final preview = await _backend.previewGit(url);
       if (preview.isEmpty) {
         await _backend.discardGitPreview(preview);
-        notice = 'No skill folder (a folder with a SKILL.md) found in that Git repository';
-        notifyListeners();
-      } else {
-        _clearNotice();
+        return const GitPreviewOutcome.failed('No skill folder (a folder with a SKILL.md) in that repository.');
       }
-      return preview;
+      return GitPreviewOutcome.found(preview);
     } catch (e) {
-      _failed(e);
-      return null;
+      return GitPreviewOutcome.failed('$e');
     }
   }
 
@@ -259,8 +265,41 @@ class CabinetController extends ChangeNotifier {
     try {
       final result = await _backend.importGit(preview, paths.toList());
       _libraryLoaded(result.library.snapshot);
+      _gitSourcesLoaded(await _backend.gitSources());
     } catch (e) {
       _failed(e);
+    }
+  }
+
+  Future<void> checkGitUpdates({bool force = true, bool quiet = false}) async {
+    if (checkingGitUpdates) return;
+    if (gitSources.isEmpty) {
+      if (!quiet) {
+        notice = 'No Git-tracked skills to check';
+        notifyListeners();
+      }
+      return;
+    }
+    checkingGitUpdates = true;
+    if (!quiet) {
+      notice = 'Checking Git repositories for updates…';
+      notifyListeners();
+    }
+    try {
+      final result = await _backend.checkGitUpdates(force: force);
+      gitSources = result.records;
+      if (!quiet || result.updates > 0 || result.failures > 0) {
+        notice = switch ((result.updates, result.failures)) {
+          (final updates, 0) when updates > 0 => '$updates Git update${updates == 1 ? '' : 's'} available',
+          (0, final failures) when failures > 0 => 'Could not check $failures Git ${failures == 1 ? 'repository' : 'repositories'}',
+          _ => 'All Git-tracked skills are up to date',
+        };
+      }
+    } catch (e) {
+      if (!quiet) notice = 'Error checking Git updates: $e';
+    } finally {
+      checkingGitUpdates = false;
+      notifyListeners();
     }
   }
 
@@ -290,6 +329,9 @@ class CabinetController extends ChangeNotifier {
       if (deleted == null) return;
       try {
         await _backend.removeGitSource(deleted);
+        final sources = {...gitSources}..remove(deleted);
+        gitSources = sources;
+        notifyListeners();
       } catch (e) {
         _noticed('Skill deleted, but Git tracking could not be cleared: $e');
       }
@@ -408,4 +450,13 @@ class CabinetController extends ChangeNotifier {
     _clearNotice();
     await _backend.removeAgent(key).then(_deploymentLoaded, onError: _failed);
   }
+}
+
+// What a clone turned up: a preview to choose from, or why it failed.
+class GitPreviewOutcome {
+  const GitPreviewOutcome.found(GitImportPreview this.preview) : error = null;
+  const GitPreviewOutcome.failed(String this.error) : preview = null;
+
+  final GitImportPreview? preview;
+  final String? error;
 }

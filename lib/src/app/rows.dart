@@ -4,6 +4,7 @@
 import '../domain/collections.dart';
 import '../domain/deployment.dart';
 import '../domain/health.dart';
+import '../domain/git_import.dart';
 import '../domain/library.dart';
 import 'cabinet_controller.dart';
 
@@ -14,6 +15,7 @@ class SkillRow {
     required this.assignedSets,
     required this.active,
     required this.previewed,
+    required this.gitSource,
   });
 
   final LibrarySkill skill;
@@ -25,6 +27,7 @@ class SkillRow {
   final List<SkillSet> assignedSets;
   final bool active;
   final bool previewed;
+  final GitSourceRecord? gitSource;
 
   String get name => skill.name;
   bool get inSet => sets.isNotEmpty;
@@ -101,6 +104,7 @@ extension CabinetRows on CabinetController {
       assignedSets: assigned,
       active: assigned.isNotEmpty || (agent?.hasSkill(skill.name) ?? false),
       previewed: skill.name == previewName,
+      gitSource: gitSources[skill.name],
     );
   }
 

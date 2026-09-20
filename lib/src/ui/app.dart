@@ -80,11 +80,11 @@ class _CabinetShellState extends State<CabinetShell> {
     await controller.importSkills(choice.paths, move: choice.move);
   }
 
+  // The URL sheet clones before it closes, so it hands back a preview
+  // rather than a URL.
   Future<void> _importGit() async {
-    final url = await showGitUrlSheet(context);
-    if (!mounted || url == null) return;
-    final preview = await _controller.previewGit(url);
-    if (preview == null || preview.isEmpty) return;
+    final preview = await showGitUrlSheet(context);
+    if (preview == null) return;
     if (!mounted) {
       await _controller.discardGitPreview(preview);
       return;
@@ -152,6 +152,10 @@ class _CabinetShellState extends State<CabinetShell> {
                   label: 'Refresh',
                   shortcut: const SingleActivator(LogicalKeyboardKey.keyR, meta: true),
                   onSelected: controller.refresh,
+                ),
+                PlatformMenuItem(
+                  label: 'Check Git Updates',
+                  onSelected: controller.checkGitUpdates,
                 ),
               ],
             ),
@@ -267,18 +271,18 @@ class _CabinetShellState extends State<CabinetShell> {
           onPressed: _importGit,
         ),
         ToolBarIconButton(
-          label: 'Open Store',
-          icon: const MacosIcon(CupertinoIcons.folder),
-          showLabel: false,
-          tooltipMessage: 'Open the store in Finder',
-          onPressed: controller.openStore,
-        ),
-        ToolBarIconButton(
           label: 'Refresh',
           icon: const MacosIcon(CupertinoIcons.arrow_clockwise),
           showLabel: false,
           tooltipMessage: 'Rescan skills and agent folders (⌘R)',
           onPressed: controller.refresh,
+        ),
+        ToolBarIconButton(
+          label: 'Check Git Updates',
+          icon: const MacosIcon(CupertinoIcons.cloud),
+          showLabel: false,
+          tooltipMessage: 'Check tracked skills for Git updates',
+          onPressed: controller.checkGitUpdates,
         ),
         if (set != null)
           ToolBarIconButton(

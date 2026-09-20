@@ -51,7 +51,7 @@ class GitImportService {
           sourceUrl,
           checkout,
         ],
-        environment: const {'GIT_TERMINAL_PROMPT': '0'},
+        environment: _gitEnvironment,
       );
       if (clone.exitCode != 0) throw GitImportException(_cloneError(clone.stderr));
 
@@ -169,6 +169,81 @@ class GitImportService {
     final records = _readSources();
     if (records.remove(skillName) != null) _writeSources(records);
   }
+
+  Map<String, GitSourceRecord> sources() => _readSources();
+
+  // Checks each unique repository/ref once. Git handles authentication through
+  // the user's existing SSH agent or credential helper; no provider API or
+  // token is involved.
+  Future<GitUpdateCheckResult> checkForUpdates({bool force = false}) async {
+    final records = _readSources();
+    if (records.isEmpty) return const GitUpdateCheckResult(records: {}, checked: 0, updates: 0);
+
+    final now = DateTime.now().toUtc();
+    final groups = <String, List<String>>{};
+    for (final entry in records.entries) {
+      final source = entry.value;
+      if (!force && source.lastCheckedAt != null && now.difference(source.lastCheckedAt!.toUtc()) < const Duration(hours: 24)) {
+        continue;
+      }
+      groups.putIfAbsent('${source.sourceUrl}\u0000${source.ref}', () => []).add(entry.key);
+    }
+    if (groups.isEmpty) {
+      return GitUpdateCheckResult(
+        records: records,
+        checked: 0,
+        updates: records.values.where((record) => record.state == GitTrackingState.updateAvailable).length,
+      );
+    }
+
+    var failures = 0;
+    final remoteByGroup = <String, String>{};
+    final errorsByGroup = <String, String>{};
+    for (final entry in groups.entries) {
+      final skill = records[entry.value.first]!;
+      try {
+        remoteByGroup[entry.key] = await _remoteRevision(skill.sourceUrl, skill.ref);
+      } catch (error) {
+        failures++;
+        errorsByGroup[entry.key] = error.toString();
+      }
+    }
+
+    final updated = <String, GitSourceRecord>{...records};
+    for (final entry in groups.entries) {
+      final remote = remoteByGroup[entry.key];
+      final error = errorsByGroup[entry.key];
+      for (final name in entry.value) {
+        final record = records[name]!;
+        updated[name] = record.withCheck(checkedAt: now, remote: remote, error: error);
+      }
+    }
+    _writeSources(updated);
+    return GitUpdateCheckResult(
+      records: updated,
+      checked: groups.length,
+      updates: updated.values.where((record) => record.state == GitTrackingState.updateAvailable).length,
+      failures: failures,
+    );
+  }
+
+  Future<String> _remoteRevision(String sourceUrl, String ref) async {
+    final remoteRef = ref == 'HEAD' ? 'HEAD' : 'refs/heads/$ref';
+    final result = await Process.run(
+      _git,
+      ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=30', 'ls-remote', sourceUrl, remoteRef],
+      environment: _gitEnvironment,
+    ).timeout(const Duration(seconds: 45));
+    if (result.exitCode != 0) throw GitImportException(_cloneError(result.stderr));
+    final line = result.stdout.toString().trim().split('\n').first.trim();
+    final revision = line.split(RegExp(r'\s+')).first;
+    if (!RegExp(r'^[0-9a-fA-F]{40,64}$').hasMatch(revision)) {
+      throw const GitImportException('The remote branch could not be resolved');
+    }
+    return revision;
+  }
+
+  Map<String, String> get _gitEnvironment => {...Platform.environment, 'GIT_TERMINAL_PROMPT': '0'};
 
   String validateRemoteUrl(String raw) {
     final value = raw.trim();
@@ -295,7 +370,18 @@ class GitImportService {
   }
 
   String _cloneError(Object stderr) {
-    final message = stderr.toString().trim().replaceAll(RegExp(r'\s+'), ' ');
+    final message = stderr
+        .toString()
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        // git narrates the checkout it was making; that is our temp
+        // directory, which says nothing to whoever pasted the URL.
+        .replaceAll(RegExp(r"Cloning into '[^']*'\.\.\. ?"), '')
+        .replaceAll(RegExp(r'^fatal: '), '')
+        .trim();
+    if (message.contains('Could not resolve host')) {
+      return 'That host could not be reached. Check the URL and your connection.';
+    }
     if (message.contains('Authentication failed') ||
         message.contains('Permission denied') ||
         message.contains('could not read Username')) {

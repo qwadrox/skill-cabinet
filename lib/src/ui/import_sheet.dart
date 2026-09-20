@@ -22,10 +22,7 @@ class ImportChoice {
 // Returns null when the user cancels or picks nothing.
 Future<ImportChoice?> showImportSheet(BuildContext context, ImportScan scan) => showAppModal<ImportChoice>(
   context: context,
-  builder: (_) => MacosSheet(
-    insetPadding: const EdgeInsets.symmetric(horizontal: 160, vertical: 80),
-    child: _ImportSheet(scan: scan),
-  ),
+  builder: (_) => AppDialogCard(width: 620, child: _ImportSheet(scan: scan)),
 );
 
 class _ImportSheet extends StatefulWidget {
@@ -76,16 +73,17 @@ class _ImportSheetState extends State<_ImportSheet> {
     final all = _selected.length == _importable.length && _importable.isNotEmpty;
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 14),
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 _candidates.length == 1 ? 'Import this skill?' : 'Found ${_candidates.length} skills',
-                style: context.macos.typography.title2.copyWith(fontWeight: FontWeight.w600),
+                style: context.macos.typography.headline.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 4),
               Text(
@@ -100,7 +98,7 @@ class _ImportSheetState extends State<_ImportSheet> {
         Flexible(
           child: ListView(
             shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
             children: [
               SectionLabel(
                 _duplicates == 0
@@ -137,33 +135,29 @@ class _ImportSheetState extends State<_ImportSheet> {
             ],
           ),
         ),
-        Container(height: 1, color: context.separator),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          child: Row(
-            children: [
-              Expanded(child: Text(count == 0 ? 'Nothing selected' : '$count selected', style: context.caption)),
-              PushButton(
-                controlSize: ControlSize.large,
-                secondary: true,
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              const SizedBox(width: 10),
-              PushButton(
-                controlSize: ControlSize.large,
-                secondary: true,
-                onPressed: count == 0 ? null : () => _done(move: true),
-                child: const Text('Move'),
-              ),
-              const SizedBox(width: 10),
-              PushButton(
-                controlSize: ControlSize.large,
-                onPressed: count == 0 ? null : () => _done(move: false),
-                child: const Text('Copy'),
-              ),
-            ],
-          ),
+        AppDialogActions(
+          children: [
+            Expanded(child: Text(count == 0 ? 'Nothing selected' : '$count selected', style: context.caption)),
+            PushButton(
+              controlSize: ControlSize.large,
+              secondary: true,
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            const SizedBox(width: 10),
+            PushButton(
+              controlSize: ControlSize.large,
+              secondary: true,
+              onPressed: count == 0 ? null : () => _done(move: true),
+              child: const Text('Move'),
+            ),
+            const SizedBox(width: 10),
+            PushButton(
+              controlSize: ControlSize.large,
+              onPressed: count == 0 ? null : () => _done(move: false),
+              child: const Text('Copy'),
+            ),
+          ],
         ),
       ],
     );

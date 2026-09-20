@@ -3,13 +3,16 @@ import 'package:macos_ui/macos_ui.dart';
 
 import '../domain/git_import.dart';
 import 'modal.dart';
+import 'scope.dart';
 import 'style.dart';
 import 'widgets.dart';
 
-Future<String?> showGitUrlSheet(BuildContext context) => showAppModal<String>(
+// Asks for a repository URL and clones it while the dialog stays up: the
+// wait and anything that goes wrong belong here, next to the field that
+// caused them, not in the pane's notice banner after the dialog closed.
+Future<GitImportPreview?> showGitUrlSheet(BuildContext context) => showAppModal<GitImportPreview>(
   context: context,
-  builder: (_) =>
-      const MacosSheet(insetPadding: EdgeInsets.symmetric(horizontal: 210, vertical: 170), child: _GitUrlSheet()),
+  builder: (_) => const AppDialogCard(child: _GitUrlSheet()),
 );
 
 class _GitUrlSheet extends StatefulWidget {
@@ -21,6 +24,8 @@ class _GitUrlSheet extends StatefulWidget {
 
 class _GitUrlSheetState extends State<_GitUrlSheet> {
   final _url = TextEditingController();
+  bool _cloning = false;
+  String? _error;
 
   @override
   void dispose() {
@@ -28,47 +33,80 @@ class _GitUrlSheetState extends State<_GitUrlSheet> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     final value = _url.text.trim();
-    if (value.isNotEmpty) Navigator.of(context).pop(value);
+    if (value.isEmpty || _cloning) return;
+    // Held across the await: the dialog may be gone by the time the clone
+    // lands, and the checkout still has to be cleaned up.
+    final controller = CabinetScope.read(context);
+    setState(() {
+      _cloning = true;
+      _error = null;
+    });
+    final outcome = await controller.previewGit(value);
+    final preview = outcome.preview;
+    if (!mounted) {
+      if (preview != null) await controller.discardGitPreview(preview);
+      return;
+    }
+    if (preview == null) {
+      setState(() {
+        _cloning = false;
+        _error = outcome.error;
+      });
+      return;
+    }
+    Navigator.of(context).pop(preview);
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(24, 22, 24, 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) {
+    final empty = _url.text.trim().isEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Import from Git', style: context.macos.typography.headline.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 4),
+              Text(
+                'Paste an HTTPS or SSH repository URL. GitHub, GitLab, Bitbucket, and self-hosted Git work.',
+                style: context.caption,
+              ),
+              const SizedBox(height: 14),
+              MacosTextField(
+                controller: _url,
+                autofocus: true,
+                // Not `enabled: false` while cloning: macos_ui paints a
+                // disabled field with its light-mode background, which flashes
+                // white in dark mode. Read-only keeps the field's own colors.
+                readOnly: _cloning,
+                placeholder: 'https://git.example.com/team/skills.git',
+                placeholderStyle: context.placeholder,
+                onChanged: (_) => setState(() => _error = null),
+                onSubmitted: (_) => _submit(),
+              ),
+              if (_error != null) ...[const SizedBox(height: 12), _ErrorNote(_error!)],
+            ],
+          ),
+        ),
+        AppDialogActions(
           children: [
-            Text('Import from Git', style: context.macos.typography.title2.copyWith(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 5),
-            Text(
-              'Paste an HTTPS or SSH repository URL. GitHub, GitLab, Bitbucket, and self-hosted Git work.',
-              style: context.caption,
+            Expanded(
+              child: !_cloning
+                  ? const SizedBox.shrink()
+                  : Row(
+                      children: [
+                        const ProgressCircle(radius: 8),
+                        const SizedBox(width: 8),
+                        Flexible(child: Text('Cloning repository…', style: context.caption)),
+                      ],
+                    ),
             ),
-          ],
-        ),
-      ),
-      Container(height: 1, color: context.separator),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(24, 18, 24, 18),
-        child: MacosTextField(
-          controller: _url,
-          autofocus: true,
-          placeholder: 'https://git.example.com/team/skills.git',
-          placeholderStyle: context.placeholder,
-          onChanged: (_) => setState(() {}),
-          onSubmitted: (_) => _submit(),
-        ),
-      ),
-      Container(height: 1, color: context.separator),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(24, 12, 24, 14),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
             PushButton(
               controlSize: ControlSize.large,
               secondary: true,
@@ -78,14 +116,45 @@ class _GitUrlSheetState extends State<_GitUrlSheet> {
             const SizedBox(width: 10),
             PushButton(
               controlSize: ControlSize.large,
-              onPressed: _url.text.trim().isEmpty ? null : _submit,
+              onPressed: empty || _cloning ? null : _submit,
               child: const Text('Find skills'),
             ),
           ],
         ),
+      ],
+    );
+  }
+}
+
+// Why the clone failed, kept in the dialog so the URL can be fixed and
+// tried again. Same tint and shape as the pane's notice banner.
+class _ErrorNote extends StatelessWidget {
+  const _ErrorNote(this.message);
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final tint = context.resolve(MacosColors.systemRedColor);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.1),
+        border: Border.all(color: tint.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(8),
       ),
-    ],
-  );
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          MacosIcon(CupertinoIcons.xmark_octagon, size: 14, color: tint),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(message, maxLines: 4, overflow: TextOverflow.ellipsis, style: context.caption),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class GitImportChoice {
@@ -97,10 +166,7 @@ class GitImportChoice {
 Future<GitImportChoice?> showGitImportSheet(BuildContext context, GitImportPreview preview) =>
     showAppModal<GitImportChoice>(
       context: context,
-      builder: (_) => MacosSheet(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 150, vertical: 70),
-        child: _GitImportSheet(preview: preview),
-      ),
+      builder: (_) => AppDialogCard(width: 620, child: _GitImportSheet(preview: preview)),
     );
 
 class _GitImportSheet extends StatefulWidget {
@@ -132,16 +198,17 @@ class _GitImportSheetState extends State<_GitImportSheet> {
   Widget build(BuildContext context) {
     final all = _selected.length == _selectable.length && _selectable.isNotEmpty;
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 14),
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'Found ${_candidates.length} skills',
-                style: context.macos.typography.title2.copyWith(fontWeight: FontWeight.w600),
+                style: context.macos.typography.headline.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 4),
               Text(
@@ -154,7 +221,8 @@ class _GitImportSheetState extends State<_GitImportSheet> {
         Container(height: 1, color: context.separator),
         Flexible(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
             children: [
               SectionLabel(
                 'SKILLS FOUND · ${_candidates.length}',
@@ -208,28 +276,24 @@ class _GitImportSheetState extends State<_GitImportSheet> {
             ],
           ),
         ),
-        Container(height: 1, color: context.separator),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          child: Row(
-            children: [
-              Expanded(child: Text('${_selected.length} selected', style: context.caption)),
-              PushButton(
-                controlSize: ControlSize.large,
-                secondary: true,
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              const SizedBox(width: 10),
-              PushButton(
-                controlSize: ControlSize.large,
-                onPressed: _selected.isEmpty
-                    ? null
-                    : () => Navigator.of(context).pop(GitImportChoice(_selected.toList())),
-                child: const Text('Import & track'),
-              ),
-            ],
-          ),
+        AppDialogActions(
+          children: [
+            Expanded(child: Text('${_selected.length} selected', style: context.caption)),
+            PushButton(
+              controlSize: ControlSize.large,
+              secondary: true,
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            const SizedBox(width: 10),
+            PushButton(
+              controlSize: ControlSize.large,
+              onPressed: _selected.isEmpty
+                  ? null
+                  : () => Navigator.of(context).pop(GitImportChoice(_selected.toList())),
+              child: const Text('Import & track'),
+            ),
+          ],
         ),
       ],
     );

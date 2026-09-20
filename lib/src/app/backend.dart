@@ -73,6 +73,16 @@ class CabinetBackend {
     return _run(() => service.removeSource(skillName));
   }
 
+  Future<Map<String, GitSourceRecord>> gitSources() {
+    final service = _git;
+    return _run(service.sources);
+  }
+
+  Future<GitUpdateCheckResult> checkGitUpdates({bool force = false}) {
+    final service = _git;
+    return _runAsync(() => service.checkForUpdates(force: force));
+  }
+
   Future<LibraryDeleteResult> deleteSkill(String name) {
     final s = _library;
     return _run(() => s.deleteSkill(name));

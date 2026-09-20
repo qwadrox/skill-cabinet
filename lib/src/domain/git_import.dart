@@ -47,6 +47,9 @@ class GitSourceRecord {
     required this.ref,
     required this.repositoryPath,
     required this.revision,
+    this.lastCheckedAt,
+    this.remoteRevision,
+    this.lastCheckError,
   });
 
   final String skillName;
@@ -54,14 +57,50 @@ class GitSourceRecord {
   final String ref;
   final String repositoryPath;
   final String revision;
+  final DateTime? lastCheckedAt;
+  final String? remoteRevision;
+  final String? lastCheckError;
 
-  Map<String, Object> toJson() => {
-    'skillName': skillName,
-    'sourceUrl': sourceUrl,
-    'ref': ref,
-    'repositoryPath': repositoryPath,
-    'revision': revision,
+  GitTrackingState get state {
+    if (lastCheckError != null) return GitTrackingState.error;
+    if (remoteRevision == null) return GitTrackingState.tracked;
+    return remoteRevision == revision ? GitTrackingState.upToDate : GitTrackingState.updateAvailable;
+  }
+
+  String get statusLabel => switch (state) {
+    GitTrackingState.tracked => 'Tracked · not checked yet',
+    GitTrackingState.upToDate => 'Up to date',
+    GitTrackingState.updateAvailable => 'Update available',
+    GitTrackingState.error => 'Update check failed',
   };
+
+  GitSourceRecord withCheck({DateTime? checkedAt, String? remote, String? error}) => GitSourceRecord(
+    skillName: skillName,
+    sourceUrl: sourceUrl,
+    ref: ref,
+    repositoryPath: repositoryPath,
+    revision: revision,
+    lastCheckedAt: checkedAt,
+    remoteRevision: remote ?? remoteRevision,
+    lastCheckError: error,
+  );
+
+  Map<String, Object> toJson() {
+    final json = <String, Object>{
+      'skillName': skillName,
+      'sourceUrl': sourceUrl,
+      'ref': ref,
+      'repositoryPath': repositoryPath,
+      'revision': revision,
+    };
+    final checked = lastCheckedAt;
+    if (checked != null) json['lastCheckedAt'] = checked.toUtc().toIso8601String();
+    final remote = remoteRevision;
+    if (remote != null) json['remoteRevision'] = remote;
+    final error = lastCheckError;
+    if (error != null) json['lastCheckError'] = error;
+    return json;
+  }
 
   static GitSourceRecord? fromJson(Object? value) {
     if (value is! Map) return null;
@@ -81,8 +120,22 @@ class GitSourceRecord {
       ref: ref!,
       repositoryPath: repositoryPath!,
       revision: revision!,
+      lastCheckedAt: DateTime.tryParse(text('lastCheckedAt') ?? ''),
+      remoteRevision: text('remoteRevision'),
+      lastCheckError: text('lastCheckError'),
     );
   }
+}
+
+enum GitTrackingState { tracked, upToDate, updateAvailable, error }
+
+class GitUpdateCheckResult {
+  const GitUpdateCheckResult({required this.records, required this.checked, required this.updates, this.failures = 0});
+
+  final Map<String, GitSourceRecord> records;
+  final int checked;
+  final int updates;
+  final int failures;
 }
 
 class GitImportResult {

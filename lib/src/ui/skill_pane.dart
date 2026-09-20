@@ -4,6 +4,7 @@ import 'package:macos_ui/macos_ui.dart';
 import '../app/cabinet_controller.dart';
 import '../app/rows.dart';
 import '../domain/deployment.dart';
+import '../domain/git_import.dart';
 import '../domain/health.dart';
 import 'dialogs.dart';
 import 'scope.dart';
@@ -326,6 +327,7 @@ class _SkillTile extends StatelessWidget {
                           style: context.body.copyWith(fontWeight: FontWeight.w500),
                         ),
                       ),
+                      if (row.gitSource != null) ...[const SizedBox(width: 5), _GitStatusIcon(row.gitSource!)],
                       if (tags.isNotEmpty) ...[const SizedBox(width: 6), SetTags(tags, highlighted: row.assignedSets)],
                     ],
                   ),
@@ -403,6 +405,7 @@ class _AddableTile extends StatelessWidget {
           MacosIcon(CupertinoIcons.plus_circle, size: 15, color: hovered ? context.accent : context.tertiaryLabel),
           const SizedBox(width: 10),
           Text(row.name, style: context.body.copyWith(color: context.secondaryLabel)),
+          if (row.gitSource != null) ...[const SizedBox(width: 5), _GitStatusIcon(row.gitSource!)],
           // Where the skill already sits, so the same skill is not added
           // to a set that overlaps one it is in.
           if (row.sets.isNotEmpty) ...[const SizedBox(width: 8), SetTags(row.sets, highlighted: row.assignedSets)],
@@ -412,6 +415,28 @@ class _AddableTile extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _GitStatusIcon extends StatelessWidget {
+  const _GitStatusIcon(this.source);
+
+  final GitSourceRecord source;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color) = switch (source.state) {
+      GitTrackingState.tracked => (CupertinoIcons.cloud, context.tertiaryLabel),
+      GitTrackingState.upToDate => (CupertinoIcons.cloud, context.secondaryLabel),
+      GitTrackingState.updateAvailable => (CupertinoIcons.cloud_download, context.accent),
+      GitTrackingState.error => (CupertinoIcons.exclamationmark_triangle, context.resolve(CupertinoColors.systemRed)),
+    };
+    final detail = '${source.statusLabel}\n${source.sourceUrl}\nref: ${source.ref}';
+    return MacosTooltip(
+      message: detail,
+      useMousePosition: false,
+      child: MacosIcon(icon, size: 14, color: color),
     );
   }
 }
