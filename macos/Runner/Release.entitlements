@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Off on purpose: the app manages ~/.skill-cabinet and symlinks into
+	     every agent's folder under $HOME (~/.claude/skills, ~/.codex/skills, …),
+	     which a sandboxed app cannot reach. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>
