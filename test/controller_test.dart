@@ -61,6 +61,24 @@ void main() {
     expect(controller.skillRows.firstWhere((r) => r.name == 'gamma').active, isTrue);
   });
 
+  test('renaming a set preserves its contents, view state, and agent assignment', () async {
+    final agent = controller.selectedAgent!;
+    controller.selectSet('Engineering');
+    controller.toggleSection('Engineering');
+    await controller.setSetEnabled('Engineering', true);
+
+    await controller.renameSet('Engineering', 'Platform');
+    await controller.refresh();
+
+    expect(controller.selectedSet?.name, 'Platform');
+    expect(controller.expandedSets, contains('Platform'));
+    expect(controller.expandedSets, isNot(contains('Engineering')));
+    expect(controller.collections.named('Engineering'), isNull);
+    expect(controller.collections.named('Platform')!.skills, ['alpha', 'beta']);
+    expect(controller.deployment.agent(agent.key)!.sets, ['Platform']);
+    expect(controller.deployment.agent(agent.key)!.linked, 2);
+  });
+
   // An import lands in the library and nowhere else. A skill that starts
   // linked for an agent is the user's decision, never the import's.
   test('a fresh import is enabled for no one', () async {

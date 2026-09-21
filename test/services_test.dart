@@ -140,6 +140,21 @@ void main() {
       expect(c.dropSkill('x').named('Data')!.skills, isEmpty);
     });
 
+    test('renames a set without changing its contents or color', () {
+      final c = CollectionsService(paths);
+      c.createSet('Web');
+      c.createSet('Data');
+      c.setMembership('Web', 'pdf', member: true);
+
+      final renamed = c.renameSet('Web', ' Platform ');
+
+      expect(renamed.named('Web'), isNull);
+      expect(renamed.named('Platform')!.skills, ['pdf']);
+      expect(renamed.named('Platform')!.color, 0);
+      expect(c.renameSet('Platform', 'Data').notice, contains('already exists'));
+      expect(c.list().sets.map((set) => set.name), ['Platform', 'Data']);
+    });
+
     test('backfills missing colors avoiding stored ones', () {
       Directory(paths.cabinetDir).createSync(recursive: true);
       File(paths.collectionsFile).writeAsStringSync(
@@ -233,6 +248,23 @@ void main() {
       expect(d.setAgentSet('claude', 'Office', enabled: true).agents.single.linked, 2);
       expect(d.setAgentEnabled('claude', enabled: false).agents.single.linked, 0);
       expect(d.setAgentEnabled('claude', enabled: true).agents.single.linked, 2);
+    });
+
+    test('renames set assignments for every agent', () {
+      CollectionsService(paths)
+        ..createSet('Office')
+        ..setMembership('Office', 'pdf', member: true);
+      final d = DeploymentService(paths)..sync();
+      d.addAgent('codex');
+      d.setAgentSet('claude', 'Office', enabled: true);
+      d.setAgentSet('codex', 'Office', enabled: true);
+      CollectionsService(paths).renameSet('Office', 'Work');
+
+      final snap = d.renameSet('Office', 'Work');
+
+      expect(snap.agents, hasLength(2));
+      expect(snap.agents.every((agent) => agent.sets.single == 'Work'), isTrue);
+      expect(snap.agents.every((agent) => agent.linked == 1), isTrue);
     });
 
     test('never touches real folders; reports them as foreign and occupied', () {

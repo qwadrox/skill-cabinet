@@ -109,6 +109,11 @@ class CabinetBackend {
     return _run(() => s.deleteSet(name));
   }
 
+  Future<CollectionsSnapshot> renameSet(String oldName, String newName) {
+    final s = _collections;
+    return _run(() => s.renameSet(oldName, newName));
+  }
+
   Future<CollectionsSnapshot> setMembership(String set, String skill, {required bool member}) {
     final s = _collections;
     return _run(() => s.setMembership(set, skill, member: member));
@@ -128,6 +133,11 @@ class CabinetBackend {
   Future<DeploymentSnapshot> setAgentSet(String agent, String set, {required bool enabled}) {
     final s = _deployment;
     return _run(() => s.setAgentSet(agent, set, enabled: enabled));
+  }
+
+  Future<DeploymentSnapshot> renameSetAssignments(String oldName, String newName) {
+    final s = _deployment;
+    return _run(() => s.renameSet(oldName, newName));
   }
 
   Future<DeploymentSnapshot> setAgentSkill(String agent, String skill, {required bool enabled}) {

@@ -67,6 +67,95 @@ Future<void> confirmDeleteSet(BuildContext context, String name) async {
   if (ok) await controller.deleteSet(name);
 }
 
+Future<void> renameSetDialog(BuildContext context, String name) async {
+  final controller = CabinetScope.read(context);
+  final renamed = await showAppModal<String>(
+    context: context,
+    builder: (_) => AppDialogCard(width: 380, child: _RenameSetDialog(name: name)),
+  );
+  if (renamed != null) await controller.renameSet(name, renamed);
+}
+
+class _RenameSetDialog extends StatefulWidget {
+  const _RenameSetDialog({required this.name});
+
+  final String name;
+
+  @override
+  State<_RenameSetDialog> createState() => _RenameSetDialogState();
+}
+
+class _RenameSetDialogState extends State<_RenameSetDialog> {
+  late final TextEditingController _name;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.name);
+    _name.selection = TextSelection(baseOffset: 0, extentOffset: _name.text.length);
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _name.text.trim();
+    if (name.isEmpty || name == widget.name) return;
+    Navigator.of(context).pop(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = _name.text.trim().isNotEmpty && _name.text.trim() != widget.name;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Rename skill set', style: context.macos.typography.headline),
+              const SizedBox(height: 14),
+              MacosTextField(
+                controller: _name,
+                autofocus: true,
+                placeholderStyle: context.placeholder,
+                onChanged: (_) => setState(() {}),
+                onSubmitted: (_) => _submit(),
+              ),
+            ],
+          ),
+        ),
+        AppDialogActions(
+          children: [
+            Expanded(
+              child: PushButton(
+                controlSize: ControlSize.large,
+                secondary: true,
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: PushButton(
+                controlSize: ControlSize.large,
+                onPressed: ready ? _submit : null,
+                child: const Text('Rename'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 Future<void> confirmDeleteSkill(BuildContext context, String name) async {
   final controller = CabinetScope.read(context);
   final ok = await _confirm(

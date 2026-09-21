@@ -208,6 +208,7 @@ class _SidebarList extends StatelessWidget {
               context: context,
               position: position,
               entries: [
+                ContextMenuEntry('Rename…', onSelected: () => renameSetDialog(context, row.set.name)),
                 ContextMenuEntry(
                   'Delete “${row.set.name}”',
                   destructive: true,

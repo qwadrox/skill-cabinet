@@ -100,6 +100,19 @@ class DeploymentService {
     return _commit(state);
   }
 
+  DeploymentSnapshot renameSet(String oldName, String newName) {
+    final state = _read();
+    for (final assignment in state.assignments.values) {
+      final renamed = <String>[];
+      for (final name in assignment.sets) {
+        final candidate = name == oldName ? newName : name;
+        if (!renamed.contains(candidate)) renamed.add(candidate);
+      }
+      assignment.sets = renamed;
+    }
+    return _commit(state);
+  }
+
   DeploymentSnapshot setAgentSkill(String agent, String skill, {required bool enabled}) {
     final state = _read();
     if (!state.providers.contains(agent)) return _snapshot(state, 'Unknown agent');

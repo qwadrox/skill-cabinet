@@ -389,6 +389,26 @@ class CabinetController extends ChangeNotifier {
     await _backend.deleteSet(name).then(_collectionsLoaded, onError: _failed);
   }
 
+  Future<void> renameSet(String oldName, String rawName) async {
+    final name = rawName.trim();
+    if (name.isEmpty || name == oldName) return;
+    _clearNotice();
+    try {
+      final result = await _backend.renameSet(oldName, name);
+      if (result.notice.isNotEmpty) {
+        _collectionsLoaded(result);
+        return;
+      }
+
+      if (_selectedSet == oldName) _selectedSet = name;
+      if (expandedSets.remove(oldName)) expandedSets.add(name);
+      _collectionsLoaded(result);
+      await _backend.renameSetAssignments(oldName, name).then(_deploymentLoaded, onError: _failed);
+    } catch (e) {
+      _failed(e);
+    }
+  }
+
   Future<void> setMembership(String set, String skill, {required bool member}) async {
     _clearNotice();
     await _backend.setMembership(set, skill, member: member).then(_collectionsLoaded, onError: _failed);

@@ -15,7 +15,7 @@ import 'fs_util.dart';
 class _StoredSet {
   _StoredSet(this.name, this.skills, this.color);
 
-  final String name;
+  String name;
   List<String> skills;
   int color;
 
@@ -40,6 +40,18 @@ class CollectionsService {
 
   CollectionsSnapshot deleteSet(String name) {
     final state = _read()..removeWhere((s) => s.name == name);
+    return _commit(state);
+  }
+
+  CollectionsSnapshot renameSet(String oldName, String rawName) {
+    final state = _read();
+    final set = _find(state, oldName);
+    if (set == null) return _snapshot(state, 'Skill set not found');
+    final name = rawName.trim();
+    if (name.isEmpty) return _snapshot(state, 'Give the skill set a name.');
+    if (name == oldName) return _snapshot(state, '');
+    if (_find(state, name) != null) return _snapshot(state, 'Skill set "$name" already exists');
+    set.name = name;
     return _commit(state);
   }
 
