@@ -60,6 +60,7 @@ class LibraryService {
             description: _descriptionAt(path),
             where: p.equals(path, normalized) ? '' : p.dirname(p.relative(path, from: normalized)),
             duplicate: lexists(p.join(paths.storeDir, name)),
+            folder: paths.tilde(p.dirname(path)),
           ),
         );
       }

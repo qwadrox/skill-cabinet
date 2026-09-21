@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:macos_ui/macos_ui.dart';
+import 'package:path/path.dart' as p;
 
 import '../domain/git_import.dart';
 import 'modal.dart';
@@ -166,7 +167,7 @@ class GitImportChoice {
 Future<GitImportChoice?> showGitImportSheet(BuildContext context, GitImportPreview preview) =>
     showAppModal<GitImportChoice>(
       context: context,
-      builder: (_) => AppDialogCard(width: 620, child: _GitImportSheet(preview: preview)),
+      builder: (_) => AppDialogCard(width: 720, maxHeight: 680, child: _GitImportSheet(preview: preview)),
     );
 
 class _GitImportSheet extends StatefulWidget {
@@ -178,25 +179,101 @@ class _GitImportSheet extends StatefulWidget {
   State<_GitImportSheet> createState() => _GitImportSheetState();
 }
 
+// Skills the library already has start unchecked and stay out of "Select
+// all": choosing one overwrites the local copy, so it takes a deliberate
+// click on that row. So do the alternative copies of a name the repository
+// holds twice; choosing one drops the other.
 class _GitImportSheetState extends State<_GitImportSheet> {
-  late final Set<String> _selected = {
-    for (final candidate in widget.preview.candidates)
-      if (candidate.selectable) candidate.repositoryPath,
-  };
+  late final Set<String> _selected = {for (final candidate in _new) candidate.repositoryPath};
 
   Iterable<GitSkillCandidate> get _candidates => widget.preview.candidates;
-  Iterable<GitSkillCandidate> get _selectable => _candidates.where((candidate) => candidate.selectable);
+  Iterable<GitSkillCandidate> get _new =>
+      _candidates.where((candidate) => candidate.selectable && !candidate.replaces && !candidate.alternative);
+  int get _replacing =>
+      _candidates.where((candidate) => candidate.replaces && _selected.contains(candidate.repositoryPath)).length;
 
   void _toggle(GitSkillCandidate candidate) {
     if (!candidate.selectable) return;
     setState(() {
-      if (!_selected.remove(candidate.repositoryPath)) _selected.add(candidate.repositoryPath);
+      if (!_selected.remove(candidate.repositoryPath)) _select(candidate);
     });
   }
 
+  void _select(GitSkillCandidate candidate) => _selected
+    ..removeAll(_candidates.where((other) => other.name == candidate.name).map((other) => other.repositoryPath))
+    ..add(candidate.repositoryPath);
+
+  // Grouped by the folder holding them, relative to the repository. A
+  // repository that is itself one skill gets no header.
+  List<(String, List<GitSkillCandidate>)> get _groups {
+    final root = '${widget.preview.repository}/';
+    final groups = groupByFolder(_candidates, (candidate) {
+      final folder = p.posix.dirname(candidate.repositoryPath);
+      return candidate.repositoryPath.isEmpty || folder == '.' ? root : '$folder/';
+    });
+    if (groups.length == 1 && _candidates.length == 1 && _candidates.single.repositoryPath.isEmpty) {
+      return [('', groups.single.$2)];
+    }
+    // Shallowest first: the main skills folder before add-ons nested
+    // deeper, whose copies are the alternatives.
+    int depth(String folder) => folder.split('/').length;
+    return groups..sort((a, b) {
+      final byDepth = depth(a.$1).compareTo(depth(b.$1));
+      return byDepth != 0 ? byDepth : a.$1.compareTo(b.$1);
+    });
+  }
+
+  Widget _row(GitSkillCandidate candidate, Color warning) => HoverRow(
+    semanticLabel: candidate.name,
+    onPressed: candidate.selectable ? () => _toggle(candidate) : null,
+    builder: (context, _) => Opacity(
+      opacity: candidate.selectable ? 1 : 0.5,
+      child: Row(
+        children: [
+          MacosCheckbox(
+            value: _selected.contains(candidate.repositoryPath),
+            onChanged: candidate.selectable ? (_) => _toggle(candidate) : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SkillCandidateText(
+              name: candidate.name,
+              description: candidate.description,
+              path: candidate.repositoryPath.isEmpty ? '${widget.preview.repository}/' : candidate.repositoryPath,
+            ),
+          ),
+          const SizedBox(width: 10),
+          if (candidate.clashes) ...[
+            MacosTooltip(
+              message:
+                  'The repository has more than one folder named ${candidate.name}. '
+                  'Only one can be imported; choosing this one leaves the other out.',
+              child: Pill(candidate.alternative ? 'Alternative copy' : 'Main copy'),
+            ),
+            const SizedBox(width: 6),
+          ],
+          if (candidate.tracked)
+            const Pill('Already tracked')
+          else if (candidate.replaces)
+            MacosTooltip(
+              message:
+                  'Replace the library’s copy with this one, which is then kept up to date from '
+                  'the repository. Agents and skill sets keep it; local edits are lost.',
+              child: _selected.contains(candidate.repositoryPath)
+                  ? Pill('Replaces local copy', color: warning)
+                  : const Pill('In library'),
+            ),
+          if (candidate.blockedReason != null) Pill(candidate.blockedReason!),
+        ],
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
-    final all = _selected.length == _selectable.length && _selectable.isNotEmpty;
+    final all = _new.isNotEmpty && _new.every((candidate) => _selected.contains(candidate.repositoryPath));
+    final replacing = _replacing;
+    final warning = context.resolve(MacosColors.systemOrangeColor);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -226,59 +303,47 @@ class _GitImportSheetState extends State<_GitImportSheet> {
             children: [
               SectionLabel(
                 'SKILLS FOUND · ${_candidates.length}',
-                trailing: _selectable.length < 2
+                trailing: _new.length < 2
                     ? null
                     : PushButton(
                         controlSize: ControlSize.small,
                         secondary: true,
                         onPressed: () => setState(() {
-                          _selected
-                            ..clear()
-                            ..addAll(all ? const <String>[] : _selectable.map((candidate) => candidate.repositoryPath));
+                          if (all) {
+                            _selected.clear();
+                          } else {
+                            _new.forEach(_select);
+                          }
                         }),
                         child: Text(all ? 'Deselect all' : 'Select all'),
                       ),
               ),
-              for (final candidate in _candidates)
-                HoverRow(
-                  semanticLabel: candidate.name,
-                  onPressed: candidate.selectable ? () => _toggle(candidate) : null,
-                  builder: (context, _) => Opacity(
-                    opacity: candidate.selectable ? 1 : 0.5,
-                    child: Row(
-                      children: [
-                        MacosCheckbox(
-                          value: _selected.contains(candidate.repositoryPath),
-                          onChanged: candidate.selectable ? (_) => _toggle(candidate) : null,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(candidate.name, style: context.body.copyWith(fontWeight: FontWeight.w500)),
-                              const SizedBox(height: 1),
-                              Text(
-                                candidate.description.isEmpty ? candidate.repositoryPath : candidate.description,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: context.caption,
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (candidate.duplicate) const Pill('Already in library'),
-                        if (candidate.blockedReason != null) Pill(candidate.blockedReason!),
-                      ],
-                    ),
-                  ),
-                ),
+              for (final (folder, candidates) in _groups) ...[
+                if (folder.isNotEmpty) FolderHeader(folder, count: candidates.length),
+                for (final candidate in candidates) _row(candidate, warning),
+              ],
             ],
           ),
         ),
         AppDialogActions(
           children: [
-            Expanded(child: Text('${_selected.length} selected', style: context.caption)),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  text: '${_selected.length} selected',
+                  children: [
+                    if (replacing > 0)
+                      TextSpan(
+                        text: ' · replaces $replacing local skill${replacing == 1 ? '' : 's'}',
+                        style: TextStyle(color: warning),
+                      ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.caption,
+              ),
+            ),
             PushButton(
               controlSize: ControlSize.large,
               secondary: true,

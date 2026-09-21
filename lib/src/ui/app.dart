@@ -8,14 +8,15 @@ import 'package:macos_ui/macos_ui.dart';
 import '../app/cabinet_controller.dart';
 import '../app/rows.dart';
 import 'agents_sheet.dart';
-import 'dialogs.dart';
 import 'import_sheet.dart';
+import 'modal.dart';
 import 'git_import_sheet.dart';
 import 'preview_pane.dart';
 import 'scope.dart';
 import 'sidebar.dart';
 import 'skill_pane.dart';
 import 'style.dart';
+import 'widgets.dart';
 
 class CabinetApp extends StatelessWidget {
   const CabinetApp({super.key, required this.controller, this.themeMode = ThemeMode.system});
@@ -155,7 +156,7 @@ class _CabinetShellState extends State<CabinetShell> {
                 ),
                 PlatformMenuItem(
                   label: 'Check Git Updates',
-                  onSelected: controller.checkGitUpdates,
+                  onSelected: controller.gitSources.isEmpty ? null : controller.checkGitUpdates,
                 ),
               ],
             ),
@@ -256,42 +257,30 @@ class _CabinetShellState extends State<CabinetShell> {
         ],
       ),
       actions: [
-        ToolBarIconButton(
-          label: 'Import',
-          icon: const MacosIcon(CupertinoIcons.square_arrow_down),
-          showLabel: false,
-          tooltipMessage: 'Import a skill folder (⌘O)',
-          onPressed: _pickImport,
-        ),
-        ToolBarIconButton(
-          label: 'Git',
-          icon: const MacosIcon(CupertinoIcons.cloud_download),
-          showLabel: false,
-          tooltipMessage: 'Import skills from a Git repository',
-          onPressed: _importGit,
-        ),
-        ToolBarIconButton(
-          label: 'Refresh',
-          icon: const MacosIcon(CupertinoIcons.arrow_clockwise),
-          showLabel: false,
-          tooltipMessage: 'Rescan skills and agent folders (⌘R)',
-          onPressed: controller.refresh,
-        ),
-        ToolBarIconButton(
-          label: 'Check Git Updates',
-          icon: const MacosIcon(CupertinoIcons.cloud),
-          showLabel: false,
-          tooltipMessage: 'Check tracked skills for Git updates',
-          onPressed: controller.checkGitUpdates,
-        ),
-        if (set != null)
-          ToolBarIconButton(
-            label: 'Delete Set',
-            icon: const MacosIcon(CupertinoIcons.trash),
-            showLabel: false,
-            tooltipMessage: 'Delete this skill set',
-            onPressed: () => confirmDeleteSet(context, set.name),
+        CustomToolbarItem(
+          inToolbarBuilder: (context) => _ToolbarMenu(
+            icon: CupertinoIcons.plus,
+            tooltip: 'Add skills',
+            entries: [
+              ContextMenuEntry('From Folder…', onSelected: _pickImport),
+              ContextMenuEntry('From Git Repository…', onSelected: _importGit),
+            ],
           ),
+        ),
+        CustomToolbarItem(
+          inToolbarBuilder: (context) => _ToolbarMenu(
+            icon: CupertinoIcons.ellipsis_circle,
+            tooltip: 'More actions',
+            entries: [
+              ContextMenuEntry('Refresh', onSelected: controller.refresh),
+              ContextMenuEntry(
+                'Check for Git Updates',
+                enabled: controller.gitSources.isNotEmpty,
+                onSelected: controller.checkGitUpdates,
+              ),
+            ],
+          ),
+        ),
         const ToolBarSpacer(spacerUnits: 0.5),
         CustomToolbarItem(
           inToolbarBuilder: (context) => SizedBox(
@@ -305,6 +294,46 @@ class _CabinetShellState extends State<CabinetShell> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// An icon with a chevron that opens a menu under itself, in place of
+// macos_ui's ToolBarPullDownButton (see showContextMenu for why).
+class _ToolbarMenu extends StatelessWidget {
+  const _ToolbarMenu({required this.icon, required this.tooltip, required this.entries});
+
+  final IconData icon;
+  final String tooltip;
+  final List<ContextMenuEntry> entries;
+
+  void _open(BuildContext context) {
+    final box = context.findRenderObject()! as RenderBox;
+    showContextMenu(context: context, position: box.localToGlobal(Offset(0, box.size.height + 4)), entries: entries);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = context.isDark ? const Color(0x80FFFFFF) : const Color(0x80000000);
+    return MacosTooltip(
+      message: tooltip,
+      useMousePosition: false,
+      child: Builder(
+        builder: (context) => HoverRow(
+          radius: 6,
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          semanticLabel: tooltip,
+          onPressed: () => _open(context),
+          builder: (context, _) => Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              MacosIcon(icon, size: 20, color: color),
+              const SizedBox(width: 3),
+              MacosIcon(CupertinoIcons.chevron_down, size: 10, color: color),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

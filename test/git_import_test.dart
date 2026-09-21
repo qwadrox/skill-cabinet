@@ -85,4 +85,101 @@ void main() {
     expect(second.records['example']?.state, GitTrackingState.updateAvailable);
     expect(second.updates, 1);
   });
+
+  test('replaces a local skill with the Git copy and tracks it', () {
+    final root = Directory.systemTemp.createTempSync('git-replace-');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final paths = CabinetPaths(p.join(root.path, 'home'));
+    final local = Directory(p.join(paths.storeDir, 'reviewer'))..createSync(recursive: true);
+    File(p.join(local.path, 'SKILL.md')).writeAsStringSync('# local\n');
+    File(p.join(local.path, 'notes.md')).writeAsStringSync('local only\n');
+
+    final session = Directory.systemTemp.createTempSync('skill-cabinet-git-');
+    addTearDown(() {
+      if (session.existsSync()) session.deleteSync(recursive: true);
+    });
+    final checkout = p.join(session.path, 'repository');
+    final remote = Directory(p.join(checkout, 'reviewer'))..createSync(recursive: true);
+    File(p.join(remote.path, 'SKILL.md')).writeAsStringSync('# from git\n');
+
+    final preview = GitImportPreview(
+      sourceUrl: 'https://git.example.com/acme/skills.git',
+      repository: 'skills',
+      ref: 'main',
+      revision: 'abc123',
+      checkoutPath: checkout,
+      candidates: [
+        GitSkillCandidate(
+          name: 'reviewer',
+          repositoryPath: 'reviewer',
+          localPath: remote.path,
+          description: '',
+          duplicate: true,
+        ),
+      ],
+    );
+    expect(preview.candidates.single.replaces, isTrue);
+
+    final result = GitImportService(paths).importSelected(preview, ['reviewer']);
+    expect(result.sourcesSaved, 1);
+    expect(result.library.imported, ['reviewer']);
+    expect(File(p.join(local.path, 'SKILL.md')).readAsStringSync(), '# from git\n');
+    expect(File(p.join(local.path, 'notes.md')).existsSync(), isFalse);
+    expect(Directory(paths.storeDir).listSync().map((e) => p.basename(e.path)), ['reviewer']);
+    expect(GitImportService(paths).sources()['reviewer']?.sourceUrl, preview.sourceUrl);
+  });
+
+  test('a skill already tracked from the same folder is not offered again', () {
+    const candidate = GitSkillCandidate(
+      name: 'reviewer',
+      repositoryPath: 'reviewer',
+      localPath: '/tmp/x',
+      description: '',
+      duplicate: true,
+      tracked: true,
+    );
+    expect(candidate.selectable, isFalse);
+    expect(candidate.replaces, isFalse);
+  });
+
+  test('a name the repository holds twice defaults to the shallower copy', () {
+    GitSkillCandidate at(String path) =>
+        GitSkillCandidate(name: p.basename(path), repositoryPath: path, localPath: '/tmp/$path', description: '');
+    final marked = GitImportService.markClashes([
+      at('extensions/banana/skills/seo-image-gen'),
+      at('skills/seo-audit'),
+      at('skills/seo-image-gen'),
+    ]);
+    final byPath = {for (final c in marked) c.repositoryPath: c};
+    expect(byPath['skills/seo-image-gen']!.clashes, isTrue);
+    expect(byPath['skills/seo-image-gen']!.alternative, isFalse);
+    expect(byPath['extensions/banana/skills/seo-image-gen']!.alternative, isTrue);
+    expect(byPath['extensions/banana/skills/seo-image-gen']!.selectable, isTrue);
+    expect(byPath['skills/seo-audit']!.clashes, isFalse);
+  });
+
+  test('refuses to import two folders of the same name', () {
+    final session = Directory.systemTemp.createTempSync('skill-cabinet-git-');
+    addTearDown(() {
+      if (session.existsSync()) session.deleteSync(recursive: true);
+    });
+    final checkout = p.join(session.path, 'repository');
+    Directory(checkout).createSync();
+    GitSkillCandidate at(String path) => GitSkillCandidate(
+      name: p.basename(path),
+      repositoryPath: path,
+      localPath: p.join(checkout, path),
+      description: '',
+    );
+    final preview = GitImportPreview(
+      sourceUrl: 'https://git.example.com/acme/skills.git',
+      repository: 'skills',
+      ref: 'main',
+      revision: 'abc123',
+      checkoutPath: checkout,
+      candidates: GitImportService.markClashes([at('a/review'), at('b/review')]),
+    );
+    final service = GitImportService(CabinetPaths(p.join(session.path, 'home')));
+    expect(() => service.importSelected(preview, ['a/review', 'b/review']), throwsA(isA<GitImportException>()));
+  });
 }

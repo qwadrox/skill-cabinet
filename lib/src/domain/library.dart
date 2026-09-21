@@ -56,6 +56,7 @@ class SkillCandidate {
     required this.description,
     required this.where,
     required this.duplicate,
+    this.folder = '',
   });
 
   // Folder name, which is the name it would take in the store.
@@ -65,6 +66,8 @@ class SkillCandidate {
   // Where it sits relative to the folder the search started from; empty
   // when that folder is the skill itself.
   final String where;
+  // The folder holding it, as the import sheet groups by: ~/... under home.
+  final String folder;
   // The store already holds a skill of this name, so importing it would
   // be refused. Shown, but never preselected.
   final bool duplicate;

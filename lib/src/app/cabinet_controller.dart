@@ -266,6 +266,11 @@ class CabinetController extends ChangeNotifier {
       final result = await _backend.importGit(preview, paths.toList());
       _libraryLoaded(result.library.snapshot);
       _gitSourcesLoaded(await _backend.gitSources());
+      // A replaced skill may be the one open in the preview.
+      final previewed = previewName;
+      if (previewed != null && result.library.imported.contains(previewed)) {
+        _previewLoaded(await _backend.preview(previewed));
+      }
     } catch (e) {
       _failed(e);
     }

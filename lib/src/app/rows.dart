@@ -79,10 +79,19 @@ class PaneSkill extends PaneEntry {
 }
 
 class SetRow {
-  const SetRow({required this.set, required this.total, required this.enabled, required this.current});
+  const SetRow({
+    required this.set,
+    required this.total,
+    required this.active,
+    required this.enabled,
+    required this.current,
+  });
 
   final SkillSet set;
   final int total;
+  // Members the selected agent receives, whether through this set, another
+  // one, or their own switch.
+  final int active;
   final bool enabled;
   final bool current;
 }
@@ -179,9 +188,16 @@ extension CabinetRows on CabinetController {
   List<SetRow> get setRows {
     final agent = selectedAgent;
     final current = selectedSet?.name;
+    final rows = _allRows;
     return [
       for (final set in collections.sets)
-        SetRow(set: set, total: _total(set), enabled: agent?.hasSet(set.name) ?? false, current: set.name == current),
+        SetRow(
+          set: set,
+          total: _total(set),
+          active: rows.where((r) => set.has(r.name) && r.active).length,
+          enabled: agent?.hasSet(set.name) ?? false,
+          current: set.name == current,
+        ),
     ];
   }
 

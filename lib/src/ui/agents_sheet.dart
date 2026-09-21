@@ -26,6 +26,15 @@ class _AgentsSheet extends StatefulWidget {
 class _AgentsSheetState extends State<_AgentsSheet> {
   final _search = TextEditingController();
   String _query = '';
+  // The notice is app-wide; one already showing when the sheet opened came
+  // from elsewhere and is left to the pane's banner.
+  late final String _staleNotice;
+
+  @override
+  void initState() {
+    super.initState();
+    _staleNotice = CabinetScope.read(context).notice;
+  }
 
   @override
   void dispose() {
@@ -124,7 +133,7 @@ class _AgentsSheetState extends State<_AgentsSheet> {
         ),
         AppDialogActions(
           children: [
-            if (controller.notice.isNotEmpty)
+            if (controller.notice.isNotEmpty && controller.notice != _staleNotice)
               Expanded(
                 child: Text(
                   controller.notice,

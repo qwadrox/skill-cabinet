@@ -27,6 +27,9 @@ class GitSkillCandidate {
     required this.localPath,
     required this.description,
     this.duplicate = false,
+    this.tracked = false,
+    this.clashes = false,
+    this.alternative = false,
     this.blockedReason,
   });
 
@@ -34,10 +37,22 @@ class GitSkillCandidate {
   final String repositoryPath;
   final String localPath;
   final String description;
+  // A skill of that name is already in the store. It can still be chosen:
+  // the repository's copy then replaces it and is tracked from here on.
   final bool duplicate;
+  // The store's copy already comes from this very folder of this repository,
+  // so there is nothing to adopt; updates arrive through the update check.
+  final bool tracked;
+  // Another folder of the repository has the same name, so only one of them
+  // can be imported.
+  final bool clashes;
+  // A clashing copy that is not the default choice: a shallower folder of
+  // that name exists, typically the main copy next to an add-on's.
+  final bool alternative;
   final String? blockedReason;
 
-  bool get selectable => !duplicate && blockedReason == null;
+  bool get selectable => !tracked && blockedReason == null;
+  bool get replaces => duplicate && selectable;
 }
 
 class GitSourceRecord {

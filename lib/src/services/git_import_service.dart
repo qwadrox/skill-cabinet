@@ -59,40 +59,28 @@ class GitImportService {
       final branch = _gitValue(checkout, ['branch', '--show-current']);
       final repository = _repositoryName(sourceUrl);
       final found = findSkillDirs(checkout, limit: maxCandidates);
+      final sources = _readSources();
       final candidates = <GitSkillCandidate>[];
       for (final path in found) {
         final relative = p.equals(path, checkout) ? '' : p.relative(path, from: checkout).replaceAll('\\', '/');
         final name = relative.isEmpty ? repository : p.basename(path);
+        final source = sources[name];
+        final duplicate = lexists(p.join(paths.storeDir, name));
         candidates.add(
           GitSkillCandidate(
             name: name,
             repositoryPath: relative,
             localPath: path,
             description: _descriptionAt(path),
-            duplicate: lexists(p.join(paths.storeDir, name)),
+            duplicate: duplicate,
+            tracked: duplicate && source != null && source.sourceUrl == sourceUrl && source.repositoryPath == relative,
             blockedReason: _blockedReason(path),
           ),
         );
       }
       candidates.sort((a, b) => a.repositoryPath.compareTo(b.repositoryPath));
 
-      final names = <String, int>{};
-      for (final candidate in candidates) {
-        names[candidate.name] = (names[candidate.name] ?? 0) + 1;
-      }
-      final normalized = [
-        for (final candidate in candidates)
-          names[candidate.name]! > 1
-              ? GitSkillCandidate(
-                  name: candidate.name,
-                  repositoryPath: candidate.repositoryPath,
-                  localPath: candidate.localPath,
-                  description: candidate.description,
-                  duplicate: candidate.duplicate,
-                  blockedReason: 'Another folder has the same skill name',
-                )
-              : candidate,
-      ];
+      final normalized = markClashes(candidates);
 
       return GitImportPreview(
         sourceUrl: sourceUrl,
@@ -108,12 +96,51 @@ class GitImportService {
     }
   }
 
+  // Folders sharing a name would land on the same store folder. The
+  // shallowest is offered by default: a repository's main copy usually
+  // sits above the ones bundled with optional add-ons.
+  static List<GitSkillCandidate> markClashes(List<GitSkillCandidate> candidates) {
+    final byName = <String, List<GitSkillCandidate>>{};
+    for (final candidate in candidates) {
+      byName.putIfAbsent(candidate.name, () => []).add(candidate);
+    }
+    int depth(GitSkillCandidate candidate) =>
+        candidate.repositoryPath.isEmpty ? 0 : candidate.repositoryPath.split('/').length;
+    final preferred = {
+      for (final entry in byName.entries)
+        if (entry.value.length > 1)
+          entry.key: (entry.value.toList()..sort((a, b) => depth(a).compareTo(depth(b)))).first.repositoryPath,
+    };
+    return [
+      for (final candidate in candidates)
+        preferred.containsKey(candidate.name)
+            ? GitSkillCandidate(
+                name: candidate.name,
+                repositoryPath: candidate.repositoryPath,
+                localPath: candidate.localPath,
+                description: candidate.description,
+                duplicate: candidate.duplicate,
+                tracked: candidate.tracked,
+                clashes: true,
+                alternative: preferred[candidate.name] != candidate.repositoryPath,
+                blockedReason: candidate.blockedReason,
+              )
+            : candidate,
+    ];
+  }
+
   GitImportResult importSelected(GitImportPreview preview, Iterable<String> pathsToImport) {
     final session = _validatedSession(preview.checkoutPath);
     final selectedPaths = pathsToImport.toSet();
     final selected = preview.candidates.where(
       (candidate) => selectedPaths.contains(candidate.repositoryPath) && candidate.selectable,
     );
+    final names = <String>{};
+    for (final candidate in selected) {
+      if (!names.add(candidate.name)) {
+        throw GitImportException('Choose one folder for ${candidate.name}; two would replace each other');
+      }
+    }
     if (selected.isEmpty) {
       discard(preview);
       return GitImportResult(LibraryImportResult(LibraryService(paths).scan()));
@@ -121,15 +148,40 @@ class GitImportService {
 
     final staging = Directory(p.join(session.path, 'selected'))..createSync();
     try {
-      final staged = <String>[];
+      final fresh = <String>[];
+      final replacing = <String, String>{};
       for (final candidate in selected) {
         final source = _validatedCandidate(preview.checkoutPath, candidate.localPath);
         final destination = p.join(staging.path, candidate.name);
         _copyTreeSafe(source, destination);
-        staged.add(destination);
+        if (candidate.duplicate) {
+          replacing[candidate.name] = destination;
+        } else {
+          fresh.add(destination);
+        }
       }
 
-      final result = LibraryService(paths).importSkills(staged, move: true);
+      final replaced = <String>[];
+      final problems = <String>[];
+      for (final entry in replacing.entries) {
+        try {
+          _replaceInStore(entry.key, entry.value);
+          replaced.add(entry.key);
+        } catch (error) {
+          problems.add('${entry.key} could not be replaced: $error');
+        }
+      }
+      var result = LibraryService(paths).importSkills(fresh, move: true);
+      if (replacing.isNotEmpty) {
+        final notice = [
+          if (result.snapshot.notice.isNotEmpty) result.snapshot.notice,
+          if (replaced.length == 1) 'Replaced ${replaced.first} with the Git version',
+          if (replaced.length > 1) 'Replaced ${replaced.length} skills with their Git versions',
+          if (problems.length == 1) problems.first,
+          if (problems.length > 1) '${problems.length} skills could not be replaced',
+        ].join(' · ');
+        result = LibraryImportResult(_withNotice(result.snapshot, notice), imported: [...result.imported, ...replaced]);
+      }
       var saved = 0;
       if (result.imported.isNotEmpty) {
         final records = <String, GitSourceRecord>{
@@ -159,6 +211,45 @@ class GitImportService {
       if (session.existsSync()) session.deleteSync(recursive: true);
     }
   }
+
+  // Swaps the store's copy of a skill for the staged one under the same
+  // name, so agent links and skill-set memberships keep pointing at it.
+  // The old copy is set aside first and put back if the swap fails.
+  void _replaceInStore(String name, String staged) {
+    if (!isPlainName(name)) throw GitImportException('Invalid skill name "$name"');
+    final dest = p.join(paths.storeDir, name);
+    // Hidden, so a scan meanwhile does not list it as a skill.
+    final backup = p.join(paths.storeDir, '.$name.replaced');
+    if (lexists(backup)) _removeEntry(backup);
+    _renameEntry(dest, backup);
+    try {
+      try {
+        Directory(staged).renameSync(dest);
+      } on FileSystemException {
+        // Another volume: copy, then remove the staged copy.
+        copyTree(staged, dest);
+        Directory(staged).deleteSync(recursive: true);
+      }
+    } catch (_) {
+      if (lexists(dest)) _removeEntry(dest);
+      _renameEntry(backup, dest);
+      rethrow;
+    }
+    _removeEntry(backup);
+  }
+
+  void _renameEntry(String from, String to) => switch (FileSystemEntity.typeSync(from, followLinks: false)) {
+    FileSystemEntityType.link => Link(from).renameSync(to),
+    FileSystemEntityType.directory => Directory(from).renameSync(to),
+    _ => File(from).renameSync(to),
+  };
+
+  // A linked-in skill loses only the link; its folder is left alone.
+  void _removeEntry(String path) => switch (FileSystemEntity.typeSync(path, followLinks: false)) {
+    FileSystemEntityType.link => Link(path).deleteSync(),
+    FileSystemEntityType.directory => Directory(path).deleteSync(recursive: true),
+    _ => File(path).deleteSync(),
+  };
 
   void discard(GitImportPreview preview) {
     final session = _validatedSession(preview.checkoutPath);

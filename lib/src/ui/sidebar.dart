@@ -3,6 +3,8 @@ import 'package:macos_ui/macos_ui.dart';
 
 import '../app/rows.dart';
 import 'agents_sheet.dart';
+import 'dialogs.dart';
+import 'modal.dart';
 import 'scope.dart';
 import 'style.dart';
 import 'widgets.dart';
@@ -202,18 +204,29 @@ class _SidebarList extends StatelessWidget {
           _SidebarItem(
             selected: row.current,
             onPressed: () => controller.selectSet(row.set.name),
+            onSecondaryTap: (position) => showContextMenu(
+              context: context,
+              position: position,
+              entries: [
+                ContextMenuEntry(
+                  'Delete “${row.set.name}”',
+                  destructive: true,
+                  onSelected: () => confirmDeleteSet(context, row.set.name),
+                ),
+              ],
+            ),
             leading: SizedBox(width: 15, child: Center(child: SetDot(row.set.color, size: 9))),
             label: row.set.name,
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('${row.total}', style: context.caption),
+                Text(agent == null ? '${row.total}' : '${row.active}/${row.total}', style: context.caption),
                 if (agent != null) ...[
                   const SizedBox(width: 8),
                   MacosTooltip(
                     message: row.enabled
                         ? 'On for ${agent.label}: every skill in the set is linked'
-                        : 'Turn on for ${agent.label}',
+                        : '${row.active} of ${row.total} linked for ${agent.label} — turn on the whole set',
                     child: MacosSwitch(
                       size: ControlSize.mini,
                       value: row.enabled,
@@ -237,6 +250,7 @@ class _SidebarItem extends StatelessWidget {
     required this.leading,
     required this.label,
     required this.trailing,
+    this.onSecondaryTap,
   });
 
   final bool selected;
@@ -244,31 +258,35 @@ class _SidebarItem extends StatelessWidget {
   final Widget leading;
   final String label;
   final Widget trailing;
+  final void Function(Offset position)? onSecondaryTap;
 
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 1),
-    child: HoverRow(
-      selected: selected,
-      selectedColor: context.sidebarSelectedFill,
-      radius: 6,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      semanticLabel: label,
-      onPressed: onPressed,
-      builder: (context, _) => Row(
-        children: [
-          leading,
-          const SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: context.body.copyWith(fontWeight: selected ? FontWeight.w500 : null),
+    child: GestureDetector(
+      onSecondaryTapUp: onSecondaryTap == null ? null : (details) => onSecondaryTap!(details.globalPosition),
+      child: HoverRow(
+        selected: selected,
+        selectedColor: context.sidebarSelectedFill,
+        radius: 6,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        semanticLabel: label,
+        onPressed: onPressed,
+        builder: (context, _) => Row(
+          children: [
+            leading,
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.body.copyWith(fontWeight: selected ? FontWeight.w500 : null),
+              ),
             ),
-          ),
-          trailing,
-        ],
+            trailing,
+          ],
+        ),
       ),
     ),
   );

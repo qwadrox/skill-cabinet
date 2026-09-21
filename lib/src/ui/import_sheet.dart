@@ -22,7 +22,7 @@ class ImportChoice {
 // Returns null when the user cancels or picks nothing.
 Future<ImportChoice?> showImportSheet(BuildContext context, ImportScan scan) => showAppModal<ImportChoice>(
   context: context,
-  builder: (_) => AppDialogCard(width: 620, child: _ImportSheet(scan: scan)),
+  builder: (_) => AppDialogCard(width: 720, maxHeight: 680, child: _ImportSheet(scan: scan)),
 );
 
 class _ImportSheet extends StatefulWidget {
@@ -66,6 +66,27 @@ class _ImportSheetState extends State<_ImportSheet> {
     ];
     Navigator.of(context).pop(paths.isEmpty ? null : ImportChoice(paths: paths, move: move));
   }
+
+  Widget _row(SkillCandidate candidate) => HoverRow(
+    semanticLabel: candidate.name,
+    onPressed: candidate.duplicate ? null : () => _toggle(candidate),
+    builder: (context, _) => Opacity(
+      opacity: candidate.duplicate ? 0.5 : 1,
+      child: Row(
+        children: [
+          MacosCheckbox(
+            value: _selected.contains(candidate.path),
+            onChanged: candidate.duplicate ? null : (_) => _toggle(candidate),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SkillCandidateText(name: candidate.name, description: candidate.description, path: candidate.path),
+          ),
+          if (candidate.duplicate) ...[const SizedBox(width: 10), const Pill('Already in library')],
+        ],
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -113,25 +134,10 @@ class _ImportSheetState extends State<_ImportSheet> {
                         child: Text(all ? 'Deselect all' : 'Select all'),
                       ),
               ),
-              for (final candidate in _candidates)
-                HoverRow(
-                  semanticLabel: candidate.name,
-                  onPressed: candidate.duplicate ? null : () => _toggle(candidate),
-                  builder: (context, _) => Opacity(
-                    opacity: candidate.duplicate ? 0.5 : 1,
-                    child: Row(
-                      children: [
-                        MacosCheckbox(
-                          value: _selected.contains(candidate.path),
-                          onChanged: candidate.duplicate ? null : (_) => _toggle(candidate),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(child: _CandidateText(candidate)),
-                        if (candidate.duplicate) ...[const SizedBox(width: 10), const Pill('Already in library')],
-                      ],
-                    ),
-                  ),
-                ),
+              for (final (folder, candidates) in groupByFolder(_candidates, (c) => c.folder)) ...[
+                FolderHeader(folder, count: candidates.length),
+                for (final candidate in candidates) _row(candidate),
+              ],
             ],
           ),
         ),
@@ -159,44 +165,6 @@ class _ImportSheetState extends State<_ImportSheet> {
             ),
           ],
         ),
-      ],
-    );
-  }
-}
-
-class _CandidateText extends StatelessWidget {
-  const _CandidateText(this.candidate);
-
-  final SkillCandidate candidate;
-
-  @override
-  Widget build(BuildContext context) {
-    // Where it was found matters when a project holds several; the
-    // description is what tells two same-looking skills apart.
-    final detail = candidate.description.isNotEmpty ? candidate.description : candidate.path;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Flexible(
-              child: Text(
-                candidate.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.body.copyWith(fontWeight: FontWeight.w500),
-              ),
-            ),
-            if (candidate.where.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(candidate.where, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.mono),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 1),
-        Text(detail, maxLines: 2, overflow: TextOverflow.ellipsis, style: context.caption),
       ],
     );
   }

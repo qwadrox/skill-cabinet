@@ -138,6 +138,82 @@ class Pill extends StatelessWidget {
   }
 }
 
+// Items in groups by the folder that holds them, groups in the order their
+// first item appears.
+List<(String, List<T>)> groupByFolder<T>(Iterable<T> items, String Function(T item) folderOf) {
+  final groups = <String, List<T>>{};
+  for (final item in items) {
+    groups.putIfAbsent(folderOf(item), () => []).add(item);
+  }
+  return [for (final entry in groups.entries) (entry.key, entry.value)];
+}
+
+// Heads the skills an import found in one folder, so the path is written
+// once for the group rather than on every row.
+class FolderHeader extends StatelessWidget {
+  const FolderHeader(this.path, {super.key, required this.count});
+
+  final String path;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 12, 10, 4),
+    child: Row(
+      children: [
+        MacosIcon(CupertinoIcons.folder, size: 12, color: context.tertiaryLabel),
+        const SizedBox(width: 6),
+        Flexible(
+          child: MacosTooltip(
+            message: path,
+            child: Text(
+              path,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.mono.copyWith(color: context.secondaryLabel),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text('$count', style: context.caption.copyWith(color: context.tertiaryLabel)),
+      ],
+    ),
+  );
+}
+
+// A skill offered by an import: its name, then two lines of description.
+// Hovering shows the description in full and where the folder is.
+class SkillCandidateText extends StatelessWidget {
+  const SkillCandidateText({super.key, required this.name, required this.description, required this.path});
+
+  final String name;
+  final String description;
+  final String path;
+
+  @override
+  Widget build(BuildContext context) => MacosTooltip(
+    message: description.isEmpty ? path : '$description\n\n$path',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: context.body.copyWith(fontWeight: FontWeight.w500),
+        ),
+        const SizedBox(height: 1),
+        Text(
+          description.isEmpty ? 'No description' : description,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: description.isEmpty ? context.caption.copyWith(color: context.tertiaryLabel) : context.caption,
+        ),
+      ],
+    ),
+  );
+}
+
 class SectionLabel extends StatelessWidget {
   const SectionLabel(this.text, {super.key, this.trailing, this.padding = const EdgeInsets.fromLTRB(10, 14, 10, 6)});
 
