@@ -167,7 +167,8 @@ class DeploymentService {
     final clash = _folderClash(state, label, dir);
     if (clash.isNotEmpty) return _snapshot(state, clash);
     final key = _freeKey(state, label);
-    state.custom[key] = AgentDefinition(key: key, label: label, dir: dir, detect: dir);
+    final stored = paths.portable(dir);
+    state.custom[key] = AgentDefinition(key: key, label: label, dir: stored, detect: stored);
     state.providers.add(key);
     state.assignments.putIfAbsent(key, _Assignment.new);
     return _commit(state);
@@ -183,12 +184,14 @@ class DeploymentService {
     final own = state.custom[key];
     final dir = rawDir.trim();
     if (dir.isEmpty && own != null) return _snapshot(state, 'Give ${agent.label} a folder.');
-    final reset = own == null && (dir.isEmpty || dir == catalogEntry(key)?.dir);
+    final catalogDir = catalogEntry(key)?.dir;
+    final reset =
+        own == null && (dir.isEmpty || (catalogDir != null && paths.resolveUser(dir) == paths.resolveUser(catalogDir)));
     if (!reset) {
       final bad = _badFolder(dir);
       if (bad.isNotEmpty) return _snapshot(state, bad);
     }
-    final target = reset ? catalogEntry(key)!.dir : dir;
+    final target = reset ? catalogDir! : paths.portable(dir);
     if (target == agent.dir) return _snapshot(state, '');
     final clash = _folderClash(state, agent.label, target, except: key);
     if (clash.isNotEmpty) return _snapshot(state, clash);
@@ -282,7 +285,8 @@ class DeploymentService {
           final dir = entry['dir'];
           if (key is! String || label is! String || dir is! String) continue;
           if (key.isEmpty || dir.isEmpty || catalogEntry(key) != null) continue;
-          state.custom[key] = AgentDefinition(key: key, label: label, dir: dir, detect: dir);
+          final stored = paths.portable(dir);
+          state.custom[key] = AgentDefinition(key: key, label: label, dir: stored, detect: stored);
         }
       }
       final overrides = raw['paths'];
@@ -291,7 +295,7 @@ class DeploymentService {
           final key = e.key;
           final dir = e.value;
           if (key is String && dir is String && dir.trim().isNotEmpty && catalogEntry(key) != null) {
-            state.overrides[key] = dir.trim();
+            state.overrides[key] = paths.portable(dir);
           }
         }
       }

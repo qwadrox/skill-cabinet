@@ -1,9 +1,11 @@
 import 'dart:isolate';
 
+import '../domain/backup.dart';
 import '../domain/collections.dart';
 import '../domain/deployment.dart';
 import '../domain/git_import.dart';
 import '../domain/library.dart';
+import '../services/backup_service.dart';
 import '../services/cabinet_paths.dart';
 import '../services/collections_service.dart';
 import '../services/deployment_service.dart';
@@ -24,12 +26,17 @@ class CabinetBackend {
   GitImportService get _git => GitImportService(paths);
   CollectionsService get _collections => CollectionsService(paths);
   DeploymentService get _deployment => DeploymentService(paths);
+  BackupService get _backup => BackupService(paths);
 
   Future<T> _run<T>(T Function() op) {
     final result = _tail.then((_) => Isolate.run(op));
     _tail = result.then((_) {}, onError: (_) {});
     return result;
   }
+
+  // Network work that touches only Git's own data: kept out of the queue
+  // so a slow remote never holds up an edit.
+  Future<T> _runOffQueue<T>(Future<T> Function() op) => Isolate.run(op);
 
   Future<T> _runAsync<T>(Future<T> Function() op) {
     final result = _tail.then((_) => Isolate.run(op));
@@ -178,5 +185,46 @@ class CabinetBackend {
   Future<DeploymentSnapshot> removeAgent(String key) {
     final s = _deployment;
     return _run(() => s.removeAgent(key));
+  }
+
+  // Backup
+  Future<BackupStatus> backupStatus() {
+    final s = _backup;
+    return _run(s.status);
+  }
+
+  Future<BackupStatus> backUp() {
+    final s = _backup;
+    return _run(s.backUp);
+  }
+
+  Future<BackupStatus> restoreBackup(String id) {
+    final s = _backup;
+    return _run(() => s.restore(id));
+  }
+
+  Future<void> setBackupRemote(String url) {
+    final s = _backup;
+    return _run(() => s.setRemote(url));
+  }
+
+  Future<BackupStatus> removeBackupRemote() {
+    final s = _backup;
+    return _run(s.removeRemote);
+  }
+
+  Future<BackupStatus> adoptBackupRemote(String url) {
+    final s = _backup;
+    return _run(() => s.adoptRemote(url));
+  }
+
+  Future<RemoteContents> probeBackupRemote(String url) {
+    final s = _backup;
+    return _runOffQueue(() => s.probe(url));
+  }
+
+  Future<void> pushBackup() {
+    final s = _backup;
+    return _runOffQueue(s.push);
   }
 }

@@ -168,3 +168,21 @@ Future<void> confirmDeleteSkill(BuildContext context, String name) async {
   );
   if (ok) await controller.deleteSkill(name);
 }
+
+Future<bool> confirmRestoreBackup(BuildContext context, String date) => _confirm(
+  context,
+  title: 'Restore the backup of $date?',
+  message:
+      'Skills, skill sets and agents go back to how they were then. The current state stays in the '
+      'history, so this can be undone.',
+  action: 'Restore',
+);
+
+Future<bool> confirmAdoptRemoteBackup(BuildContext context) => _confirm(
+  context,
+  title: 'Restore this backup?',
+  message:
+      'The repository already holds a Skill Cabinet backup. Restoring replaces the skills, skill sets '
+      'and agents on this Mac with it, and backs up there from now on.',
+  action: 'Restore',
+);

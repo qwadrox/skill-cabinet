@@ -15,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:skill_cabinet/src/app/cabinet_controller.dart';
 import 'package:skill_cabinet/src/services/cabinet_paths.dart';
 import 'package:skill_cabinet/src/ui/agents_sheet.dart';
+import 'package:skill_cabinet/src/ui/backup_sheet.dart';
 import 'package:skill_cabinet/src/ui/app.dart';
 import 'package:skill_cabinet/src/ui/skill_pane.dart';
 
@@ -116,6 +117,13 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(seconds: 1)));
     await tester.pumpAndSettle();
     await capture('agents-dark', ThemeMode.dark);
+    Navigator.of(tester.element(find.byType(SkillPane)), rootNavigator: true).pop();
+    await tester.pumpAndSettle();
+    // The backup sheet, with whatever history the sample home has.
+    await tester.runAsync(controller.backUpNow);
+    showBackupSheet(tester.element(find.byType(SkillPane)));
+    await tester.pumpAndSettle();
+    await capture('backup-dark', ThemeMode.dark);
     debugDefaultTargetPlatformOverride = null;
   });
 }

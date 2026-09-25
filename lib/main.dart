@@ -8,6 +8,7 @@ import 'src/ui/app.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await const MacosWindowUtilsConfig().apply();
-  final controller = CabinetController(CabinetPaths.fromEnvironment())..load();
+  final controller = CabinetController(CabinetPaths.fromEnvironment(), autoBackupDelay: const Duration(seconds: 20))
+    ..load();
   runApp(CabinetApp(controller: controller));
 }

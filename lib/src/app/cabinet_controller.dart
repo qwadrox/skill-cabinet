@@ -11,15 +11,19 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:path/path.dart' as p;
 
+import '../domain/backup.dart';
 import '../domain/collections.dart';
 import '../domain/deployment.dart';
 import '../domain/git_import.dart';
 import '../domain/library.dart';
+import '../services/backup_service.dart';
 import '../services/cabinet_paths.dart';
 import 'backend.dart';
 
 class CabinetController extends ChangeNotifier {
-  CabinetController(CabinetPaths paths) : _backend = CabinetBackend(paths) {
+  // autoBackupDelay: how long after the last change a backup point is
+  // made; null leaves backups to explicit calls (tests, screenshots).
+  CabinetController(CabinetPaths paths, {this.autoBackupDelay}) : _backend = CabinetBackend(paths) {
     // Every edit of the field is a change of the filter, however it was
     // made: typed, cleared with the ⓧ, or dropped by a view change.
     searchField.addListener(notifyListeners);
@@ -29,10 +33,12 @@ class CabinetController extends ChangeNotifier {
   void dispose() {
     searchField.removeListener(notifyListeners);
     searchField.dispose();
+    _backupTimer?.cancel();
     super.dispose();
   }
 
   final CabinetBackend _backend;
+  final Duration? autoBackupDelay;
 
   LibrarySnapshot library = LibrarySnapshot.empty;
   Map<String, GitSourceRecord> gitSources = const {};
@@ -59,6 +65,12 @@ class CabinetController extends ChangeNotifier {
   String notice = '';
   bool checkingGitUpdates = false;
   bool applyingGitUpdates = false;
+  BackupStatus backup = BackupStatus.empty;
+  // Why the last backup or push failed; empty when it went through.
+  String backupError = '';
+  bool backingUp = false;
+  bool _backupAgain = false;
+  Timer? _backupTimer;
 
   String get search => searchField.text;
 
@@ -79,6 +91,7 @@ class CabinetController extends ChangeNotifier {
         _backend.gitSources().then(_gitSourcesLoaded),
         _backend.listSets().then(_collectionsLoaded),
         _backend.sync().then(_deploymentLoaded),
+        _backend.backupStatus().then(_backupLoaded),
         if (previewName != null) _backend.preview(previewName!).then(_previewLoaded),
       ]);
     } catch (e) {
@@ -98,6 +111,7 @@ class CabinetController extends ChangeNotifier {
 
   void _libraryLoaded(LibrarySnapshot snapshot) {
     library = snapshot;
+    _backupSoon();
     // The previewed skill left the store: close the preview.
     if (previewName != null && !snapshot.has(previewName!)) {
       previewName = null;
@@ -109,6 +123,7 @@ class CabinetController extends ChangeNotifier {
 
   void _collectionsLoaded(CollectionsSnapshot snapshot) {
     collections = snapshot;
+    _backupSoon();
     if (_selectedSet != null && snapshot.named(_selectedSet!) == null) _selectedSet = null;
     expandedSets.retainWhere((name) => snapshot.named(name) != null);
     _noticed(snapshot.notice);
@@ -117,6 +132,7 @@ class CabinetController extends ChangeNotifier {
 
   void _gitSourcesLoaded(Map<String, GitSourceRecord> sources) {
     gitSources = sources;
+    _backupSoon();
     notifyListeners();
   }
 
@@ -124,11 +140,17 @@ class CabinetController extends ChangeNotifier {
     // Removing the selected agent selects the one that takes its place.
     final before = deployment.agents.indexWhere((a) => a.key == _selectedAgent);
     deployment = snapshot;
+    _backupSoon();
     if (snapshot.agent(_selectedAgent ?? '') == null) {
       final agents = snapshot.agents;
       _selectedAgent = agents.isEmpty ? null : agents[before.clamp(0, agents.length - 1)].key;
     }
     _noticed(snapshot.notice);
+    notifyListeners();
+  }
+
+  void _backupLoaded(BackupStatus status) {
+    backup = status;
     notifyListeners();
   }
 
@@ -505,6 +527,124 @@ class CabinetController extends ChangeNotifier {
   Future<void> removeAgent(String key) async {
     _clearNotice();
     await _backend.removeAgent(key).then(_deploymentLoaded, onError: _failed);
+  }
+
+  // ---- backup -----------------------------------------------------------------
+
+  // Every change lands in the cabinet's state files, and every one of those
+  // passes through a *Loaded handler, which calls this. The backup point is
+  // made once things settle; a change left when the app quits is picked up
+  // by the next launch's load.
+  void _backupSoon() {
+    final delay = autoBackupDelay;
+    if (delay == null) return;
+    _backupTimer?.cancel();
+    _backupTimer = Timer(delay, () => unawaited(backUpNow()));
+  }
+
+  // Makes a backup point (when anything changed) and sends it to the
+  // remote. Quiet: a failure shows in the Backup sheet, not over the list.
+  Future<void> backUpNow() async {
+    if (backingUp) {
+      _backupAgain = true;
+      return;
+    }
+    backingUp = true;
+    notifyListeners();
+    try {
+      backup = await _backend.backUp();
+      if (backup.hasRemote && backup.unpushed > 0) {
+        await _backend.pushBackup();
+        backup = await _backend.backupStatus();
+      }
+      backupError = '';
+    } catch (e) {
+      backupError = '$e';
+    } finally {
+      backingUp = false;
+      notifyListeners();
+    }
+    if (_backupAgain) {
+      _backupAgain = false;
+      await backUpNow();
+    }
+  }
+
+  // Connects a remote. An empty one gets this Mac's history; one that
+  // already holds a backup is left alone until the user chooses to
+  // restore it (restoreFromRemote).
+  Future<BackupConnectResult> connectBackup(String rawUrl) async {
+    final url = rawUrl.trim();
+    if (url.isEmpty) {
+      return const BackupConnectResult(BackupConnectOutcome.failed, message: 'Enter the repository URL.');
+    }
+    try {
+      backup = await _backend.backUp();
+      switch (await _backend.probeBackupRemote(url)) {
+        case RemoteContents.other:
+          return const BackupConnectResult(
+            BackupConnectOutcome.failed,
+            message: 'That repository already holds something else. Use an empty repository for backups.',
+          );
+        case RemoteContents.backup:
+          return const BackupConnectResult(BackupConnectOutcome.holdsBackup);
+        case RemoteContents.empty:
+          await _backend.setBackupRemote(url);
+          try {
+            await _backend.pushBackup();
+          } catch (_) {
+            backup = await _backend.removeBackupRemote();
+            rethrow;
+          }
+          backup = await _backend.backupStatus();
+          backupError = '';
+          return const BackupConnectResult(BackupConnectOutcome.connected);
+      }
+    } catch (e) {
+      return BackupConnectResult(BackupConnectOutcome.failed, message: '$e');
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  // Replaces this Mac's cabinet with the backup connectBackup found, and
+  // backs up there from now on. Reloading relinks every agent, creating
+  // agent folders this Mac does not have yet.
+  Future<void> restoreFromRemote(String url) async {
+    _clearNotice();
+    try {
+      backup = await _backend.adoptBackupRemote(url.trim());
+      backupError = '';
+      await load();
+      notice = 'Restored the backup from ${backup.remote}';
+      notifyListeners();
+    } catch (e) {
+      _failed(e);
+    }
+  }
+
+  Future<void> disconnectBackup() async {
+    try {
+      backup = await _backend.removeBackupRemote();
+      backupError = '';
+    } catch (e) {
+      backupError = '$e';
+    }
+    notifyListeners();
+  }
+
+  // Puts the cabinet back to a backup point, then relinks every agent.
+  Future<void> restoreBackup(BackupEntry entry) async {
+    _clearNotice();
+    try {
+      backup = await _backend.restoreBackup(entry.id);
+      await load();
+      notice = 'Restored the backup of ${backupDateLabel(entry.date)}';
+      notifyListeners();
+      if (backup.hasRemote) unawaited(backUpNow());
+    } catch (e) {
+      _failed(e);
+    }
   }
 }
 

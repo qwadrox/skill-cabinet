@@ -37,6 +37,15 @@ class CabinetPaths {
     return p.normalize(p.join(home, value));
   }
 
+  // Stored form of a folder the user wrote down: ~/... for anything under
+  // home, so a backup restored on a Mac with another home still finds it.
+  String portable(String raw) {
+    final full = resolveUser(raw);
+    if (full == home) return '~';
+    if (p.isWithin(home, full)) return '~/${p.relative(full, from: home)}';
+    return full;
+  }
+
   // Display form: ~/... for anything under home.
   String tilde(String full) {
     if (full == home) return '~';

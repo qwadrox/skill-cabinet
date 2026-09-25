@@ -8,6 +8,7 @@ import 'package:macos_ui/macos_ui.dart';
 import '../app/cabinet_controller.dart';
 import '../app/rows.dart';
 import 'agents_sheet.dart';
+import 'backup_sheet.dart';
 import 'import_sheet.dart';
 import 'modal.dart';
 import 'git_import_sheet.dart';
@@ -137,6 +138,9 @@ class _CabinetShellState extends State<CabinetShell> {
                 PlatformMenuItem(label: 'Import from Git…', onSelected: _importGit),
                 PlatformMenuItem(label: 'Open Store in Finder', onSelected: controller.openStore),
               ],
+            ),
+            PlatformMenuItemGroup(
+              members: [PlatformMenuItem(label: 'Backup…', onSelected: () => showBackupSheet(context))],
             ),
           ],
         ),
@@ -279,6 +283,7 @@ class _CabinetShellState extends State<CabinetShell> {
                 enabled: controller.gitSources.isNotEmpty,
                 onSelected: () => showGitUpdatesSheet(context),
               ),
+              ContextMenuEntry('Backup…', onSelected: () => showBackupSheet(context)),
             ],
           ),
         ),

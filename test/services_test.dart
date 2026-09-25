@@ -231,8 +231,8 @@ void main() {
       expect(Link(moved).targetSync(), p.join(paths.storeDir, 'pdf'));
       expect(FileSystemEntity.typeSync(p.join(claudeDir, 'pdf'), followLinks: false), FileSystemEntityType.notFound);
 
-      // The override is stored, and an empty folder restores the default.
-      expect(DeploymentService(paths).sync().agents.single.dir, '.claude/other-skills');
+      // The override is stored home-relative, and an empty folder restores the default.
+      expect(DeploymentService(paths).sync().agents.single.dir, '~/.claude/other-skills');
       snap = DeploymentService(paths).setAgentPath('claude', '');
       expect(snap.agents.single.path, '~/.claude/skills');
       expect(Link(p.join(claudeDir, 'pdf')).targetSync(), p.join(paths.storeDir, 'pdf'));
