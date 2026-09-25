@@ -36,23 +36,19 @@ class GitImportService {
     final session = Directory.systemTemp.createTempSync(_tempPrefix);
     final checkout = p.join(session.path, 'repository');
     try {
-      final clone = await Process.run(
-        _git,
-        [
-          '-c',
-          'http.lowSpeedLimit=1000',
-          '-c',
-          'http.lowSpeedTime=30',
-          'clone',
-          '--depth',
-          '1',
-          '--no-tags',
-          '--',
-          sourceUrl,
-          checkout,
-        ],
-        environment: _gitEnvironment,
-      );
+      final clone = await Process.run(_git, [
+        '-c',
+        'http.lowSpeedLimit=1000',
+        '-c',
+        'http.lowSpeedTime=30',
+        'clone',
+        '--depth',
+        '1',
+        '--no-tags',
+        '--',
+        sourceUrl,
+        checkout,
+      ], environment: _gitEnvironment);
       if (clone.exitCode != 0) throw GitImportException(_cloneError(clone.stderr));
 
       final revision = _gitValue(checkout, ['rev-parse', 'HEAD']);
@@ -274,7 +270,9 @@ class GitImportService {
     final groups = <String, List<String>>{};
     for (final entry in records.entries) {
       final source = entry.value;
-      if (!force && source.lastCheckedAt != null && now.difference(source.lastCheckedAt!.toUtc()) < const Duration(hours: 24)) {
+      if (!force &&
+          source.lastCheckedAt != null &&
+          now.difference(source.lastCheckedAt!.toUtc()) < const Duration(hours: 24)) {
         continue;
       }
       groups.putIfAbsent('${source.sourceUrl}\u0000${source.ref}', () => []).add(entry.key);
@@ -318,13 +316,88 @@ class GitImportService {
     );
   }
 
+  // Replaces selected tracked skills from fresh shallow checkouts. Skills
+  // from the same repository/ref share a checkout, so updating a large
+  // collection does not clone the same repository once per skill.
+  Future<GitUpdateApplyResult> applyUpdates(Iterable<String> skillNames) async {
+    final records = _readSources();
+    final selected = skillNames.toSet().where(records.containsKey).toList();
+    if (selected.isEmpty) return GitUpdateApplyResult(records: records);
+
+    final groups = <String, List<String>>{};
+    for (final name in selected) {
+      final source = records[name]!;
+      groups.putIfAbsent('${source.sourceUrl}\u0000${source.ref}', () => []).add(name);
+    }
+
+    final updated = <String>[];
+    final failures = <String, String>{};
+    final nextRecords = <String, GitSourceRecord>{...records};
+    for (final names in groups.values) {
+      final source = records[names.first]!;
+      final session = Directory.systemTemp.createTempSync(_tempPrefix);
+      final checkout = p.join(session.path, 'repository');
+      try {
+        final args = <String>[
+          '-c',
+          'http.lowSpeedLimit=1000',
+          '-c',
+          'http.lowSpeedTime=30',
+          'clone',
+          '--depth',
+          '1',
+          '--no-tags',
+          if (source.ref != 'HEAD') ...['--branch', source.ref],
+          '--',
+          source.sourceUrl,
+          checkout,
+        ];
+        final clone = await Process.run(_git, args, environment: _gitEnvironment).timeout(const Duration(seconds: 90));
+        if (clone.exitCode != 0) throw GitImportException(_cloneError(clone.stderr));
+        final revision = _gitValue(checkout, ['rev-parse', 'HEAD']);
+        final staging = Directory(p.join(session.path, 'selected'))..createSync();
+
+        for (final name in names) {
+          final record = records[name]!;
+          try {
+            final relative = record.repositoryPath;
+            final candidate = relative.isEmpty || relative == '.'
+                ? checkout
+                : p.joinAll([checkout, ...p.posix.split(relative)]);
+            final skill = _validatedCandidate(checkout, candidate);
+            final staged = p.join(staging.path, name);
+            _copyTreeSafe(skill, staged);
+            _replaceInStore(name, staged);
+            nextRecords[name] = record.withRevision(revision, updatedAt: DateTime.now().toUtc());
+            updated.add(name);
+          } catch (error) {
+            failures[name] = error.toString();
+          }
+        }
+      } catch (error) {
+        for (final name in names) {
+          failures[name] = error.toString();
+        }
+      } finally {
+        if (session.existsSync()) session.deleteSync(recursive: true);
+      }
+    }
+
+    if (updated.isNotEmpty) _writeSources(nextRecords);
+    return GitUpdateApplyResult(records: nextRecords, updated: updated, failures: failures);
+  }
+
   Future<String> _remoteRevision(String sourceUrl, String ref) async {
     final remoteRef = ref == 'HEAD' ? 'HEAD' : 'refs/heads/$ref';
-    final result = await Process.run(
-      _git,
-      ['-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=30', 'ls-remote', sourceUrl, remoteRef],
-      environment: _gitEnvironment,
-    ).timeout(const Duration(seconds: 45));
+    final result = await Process.run(_git, [
+      '-c',
+      'http.lowSpeedLimit=1000',
+      '-c',
+      'http.lowSpeedTime=30',
+      'ls-remote',
+      sourceUrl,
+      remoteRef,
+    ], environment: _gitEnvironment).timeout(const Duration(seconds: 45));
     if (result.exitCode != 0) throw GitImportException(_cloneError(result.stderr));
     final line = result.stdout.toString().trim().split('\n').first.trim();
     final revision = line.split(RegExp(r'\s+')).first;

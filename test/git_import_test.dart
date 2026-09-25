@@ -86,6 +86,63 @@ void main() {
     expect(second.updates, 1);
   });
 
+  test('applies an available update and advances its tracked revision', () async {
+    final root = Directory.systemTemp.createTempSync('git-update-apply-');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final remote = Directory(p.join(root.path, 'remote'))..createSync(recursive: true);
+    File(p.join(remote.path, 'SKILL.md')).writeAsStringSync('# first\n');
+    for (final args in [
+      ['init', '-q'],
+      ['config', 'user.email', 'test@example.com'],
+      ['config', 'user.name', 'Test'],
+      ['add', '.'],
+      ['commit', '-qm', 'first'],
+    ]) {
+      final result = Process.runSync('/usr/bin/git', ['-C', remote.path, ...args]);
+      expect(result.exitCode, 0, reason: '${args.join(' ')} failed: ${result.stderr}');
+    }
+    final firstRevision = Process.runSync('/usr/bin/git', [
+      '-C',
+      remote.path,
+      'rev-parse',
+      'HEAD',
+    ]).stdout.toString().trim();
+    final paths = CabinetPaths(p.join(root.path, 'home'));
+    final local = Directory(p.join(paths.storeDir, 'example'))..createSync(recursive: true);
+    File(p.join(local.path, 'SKILL.md')).writeAsStringSync('# first\n');
+    File(p.join(local.path, 'local-only.md')).writeAsStringSync('removed by update\n');
+    final record = GitSourceRecord(
+      skillName: 'example',
+      sourceUrl: remote.path,
+      ref: 'HEAD',
+      repositoryPath: '.',
+      revision: firstRevision,
+    );
+    writeJsonAtomic(paths.gitSourcesFile, {'example': record.toJson()});
+
+    File(p.join(remote.path, 'SKILL.md')).writeAsStringSync('# second\n');
+    expect(Process.runSync('/usr/bin/git', ['-C', remote.path, 'add', '.']).exitCode, 0);
+    expect(Process.runSync('/usr/bin/git', ['-C', remote.path, 'commit', '-qm', 'second']).exitCode, 0);
+    final secondRevision = Process.runSync('/usr/bin/git', [
+      '-C',
+      remote.path,
+      'rev-parse',
+      'HEAD',
+    ]).stdout.toString().trim();
+
+    final service = GitImportService(paths);
+    final checked = await service.checkForUpdates(force: true);
+    expect(checked.records['example']?.state, GitTrackingState.updateAvailable);
+    final applied = await service.applyUpdates(['example']);
+
+    expect(applied.updated, ['example']);
+    expect(applied.failures, isEmpty);
+    expect(File(p.join(local.path, 'SKILL.md')).readAsStringSync(), '# second\n');
+    expect(File(p.join(local.path, 'local-only.md')).existsSync(), isFalse);
+    expect(applied.records['example']?.revision, secondRevision);
+    expect(applied.records['example']?.state, GitTrackingState.upToDate);
+  });
+
   test('replaces a local skill with the Git copy and tracks it', () {
     final root = Directory.systemTemp.createTempSync('git-replace-');
     addTearDown(() => root.deleteSync(recursive: true));

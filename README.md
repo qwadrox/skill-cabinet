@@ -21,7 +21,7 @@ AI agent skills are often scattered across several hidden folders. Skill Cabinet
 - Group related skills into collections such as *Writing*, *Research*, or *Development*.
 - Turn collections or individual skills on and off for each agent.
 - Keep agent skill folders synchronized with links managed by the cabinet.
-- Track Git-imported skills and see when a remote revision is available.
+- Track Git-imported skills, review available revisions, and update selected skills in place.
 - See problems, such as missing or conflicting skills, without silently changing files you do not own.
 
 ## How it works
@@ -85,7 +85,7 @@ The app does not upload your skills. It uses macOS file links to make enabled sk
 
 ## Status
 
-Skill Cabinet is an early macOS release. Git repository import supports shallow HTTPS/SSH checkouts, with provider-neutral remote revision checks and cloud status indicators. Applying an available update remains an explicit user action.
+Skill Cabinet is an early macOS release. Git repository import supports shallow HTTPS/SSH checkouts, with provider-neutral remote revision checks, cloud status indicators, and an update manager. Applying an available update remains an explicit user action.
 
 ## License
 

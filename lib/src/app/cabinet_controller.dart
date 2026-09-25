@@ -58,6 +58,7 @@ class CabinetController extends ChangeNotifier {
   SkillPreview? preview;
   String notice = '';
   bool checkingGitUpdates = false;
+  bool applyingGitUpdates = false;
 
   String get search => searchField.text;
 
@@ -296,7 +297,8 @@ class CabinetController extends ChangeNotifier {
       if (!quiet || result.updates > 0 || result.failures > 0) {
         notice = switch ((result.updates, result.failures)) {
           (final updates, 0) when updates > 0 => '$updates Git update${updates == 1 ? '' : 's'} available',
-          (0, final failures) when failures > 0 => 'Could not check $failures Git ${failures == 1 ? 'repository' : 'repositories'}',
+          (0, final failures) when failures > 0 =>
+            'Could not check $failures Git ${failures == 1 ? 'repository' : 'repositories'}',
           _ => 'All Git-tracked skills are up to date',
         };
       }
@@ -304,6 +306,35 @@ class CabinetController extends ChangeNotifier {
       if (!quiet) notice = 'Error checking Git updates: $e';
     } finally {
       checkingGitUpdates = false;
+      notifyListeners();
+    }
+  }
+
+  Future<GitUpdateApplyResult> applyGitUpdates(Iterable<String> skillNames) async {
+    final names = skillNames.toSet().toList();
+    if (names.isEmpty || applyingGitUpdates) return GitUpdateApplyResult(records: gitSources);
+    _clearNotice();
+    applyingGitUpdates = true;
+    notifyListeners();
+    try {
+      final result = await _backend.applyGitUpdates(names);
+      gitSources = result.records;
+      _libraryLoaded(await _backend.scan());
+      final previewed = previewName;
+      if (previewed != null && result.updated.contains(previewed)) {
+        _previewLoaded(await _backend.preview(previewed));
+      }
+      notice = switch ((result.updated.length, result.failures.length)) {
+        (final count, 0) => 'Updated $count Git-tracked skill${count == 1 ? '' : 's'}',
+        (0, final count) => 'Could not update $count skill${count == 1 ? '' : 's'}',
+        (final done, final failed) => 'Updated $done skill${done == 1 ? '' : 's'} · $failed failed',
+      };
+      return result;
+    } catch (error) {
+      notice = 'Error applying Git updates: $error';
+      return GitUpdateApplyResult(records: gitSources, failures: {for (final name in names) name: error.toString()});
+    } finally {
+      applyingGitUpdates = false;
       notifyListeners();
     }
   }

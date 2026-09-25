@@ -7,6 +7,7 @@ import '../domain/deployment.dart';
 import '../domain/git_import.dart';
 import '../domain/health.dart';
 import 'dialogs.dart';
+import 'git_updates_sheet.dart';
 import 'scope.dart';
 import 'style.dart';
 import 'widgets.dart';
@@ -23,6 +24,9 @@ class SkillPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = CabinetScope.of(context);
+    final updates = controller.gitSources.values
+        .where((source) => source.state == GitTrackingState.updateAvailable)
+        .length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -31,7 +35,11 @@ class SkillPane extends StatelessWidget {
           alignment: Alignment.topCenter,
           child: controller.notice.isEmpty
               ? const SizedBox(width: double.infinity)
-              : _NoticeBanner(controller.notice, onDismiss: controller.dismissNotice),
+              : _NoticeBanner(
+                  controller.notice,
+                  onDismiss: controller.dismissNotice,
+                  onReviewUpdates: updates == 0 ? null : () => showGitUpdatesSheet(context),
+                ),
         ),
         Expanded(
           child: !controller.loaded
@@ -193,10 +201,11 @@ class SkillPane extends StatelessWidget {
 }
 
 class _NoticeBanner extends StatelessWidget {
-  const _NoticeBanner(this.text, {required this.onDismiss});
+  const _NoticeBanner(this.text, {required this.onDismiss, this.onReviewUpdates});
 
   final String text;
   final VoidCallback onDismiss;
+  final VoidCallback? onReviewUpdates;
 
   @override
   Widget build(BuildContext context) {
@@ -219,6 +228,15 @@ class _NoticeBanner extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(child: Text(text, style: context.callout)),
+          if (onReviewUpdates != null) ...[
+            PushButton(
+              controlSize: ControlSize.small,
+              secondary: true,
+              onPressed: onReviewUpdates,
+              child: const Text('Review updates'),
+            ),
+            const SizedBox(width: 6),
+          ],
           IconAction(icon: CupertinoIcons.xmark, tooltip: 'Dismiss', size: 12, onPressed: onDismiss),
         ],
       ),
@@ -327,7 +345,13 @@ class _SkillTile extends StatelessWidget {
                           style: context.body.copyWith(fontWeight: FontWeight.w500),
                         ),
                       ),
-                      if (row.gitSource != null) ...[const SizedBox(width: 5), _GitStatusIcon(row.gitSource!)],
+                      if (row.gitSource != null) ...[
+                        const SizedBox(width: 5),
+                        _GitStatusIcon(
+                          row.gitSource!,
+                          onPressed: () => showGitUpdatesSheet(context, focusSkill: row.name),
+                        ),
+                      ],
                       if (tags.isNotEmpty) ...[const SizedBox(width: 6), SetTags(tags, highlighted: row.assignedSets)],
                     ],
                   ),
@@ -405,7 +429,10 @@ class _AddableTile extends StatelessWidget {
           MacosIcon(CupertinoIcons.plus_circle, size: 15, color: hovered ? context.accent : context.tertiaryLabel),
           const SizedBox(width: 10),
           Text(row.name, style: context.body.copyWith(color: context.secondaryLabel)),
-          if (row.gitSource != null) ...[const SizedBox(width: 5), _GitStatusIcon(row.gitSource!)],
+          if (row.gitSource != null) ...[
+            const SizedBox(width: 5),
+            _GitStatusIcon(row.gitSource!, onPressed: () => showGitUpdatesSheet(context, focusSkill: row.name)),
+          ],
           // Where the skill already sits, so the same skill is not added
           // to a set that overlaps one it is in.
           if (row.sets.isNotEmpty) ...[const SizedBox(width: 8), SetTags(row.sets, highlighted: row.assignedSets)],
@@ -420,9 +447,10 @@ class _AddableTile extends StatelessWidget {
 }
 
 class _GitStatusIcon extends StatelessWidget {
-  const _GitStatusIcon(this.source);
+  const _GitStatusIcon(this.source, {required this.onPressed});
 
   final GitSourceRecord source;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -432,11 +460,17 @@ class _GitStatusIcon extends StatelessWidget {
       GitTrackingState.updateAvailable => (CupertinoIcons.cloud_download, context.accent),
       GitTrackingState.error => (CupertinoIcons.exclamationmark_triangle, context.resolve(CupertinoColors.systemRed)),
     };
-    final detail = '${source.statusLabel}\n${source.sourceUrl}\nref: ${source.ref}';
+    final detail = '${source.statusLabel}\n${source.sourceUrl}\nref: ${source.ref}\n\nClick to manage Git updates';
     return MacosTooltip(
       message: detail,
       useMousePosition: false,
-      child: MacosIcon(icon, size: 14, color: color),
+      child: HoverRow(
+        semanticLabel: 'Manage Git updates for ${source.skillName}',
+        onPressed: onPressed,
+        radius: 4,
+        padding: const EdgeInsets.all(2),
+        builder: (context, _) => MacosIcon(icon, size: 14, color: color),
+      ),
     );
   }
 }

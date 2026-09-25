@@ -100,6 +100,16 @@ class GitSourceRecord {
     lastCheckError: error,
   );
 
+  GitSourceRecord withRevision(String value, {required DateTime updatedAt}) => GitSourceRecord(
+    skillName: skillName,
+    sourceUrl: sourceUrl,
+    ref: ref,
+    repositoryPath: repositoryPath,
+    revision: value,
+    lastCheckedAt: updatedAt,
+    remoteRevision: value,
+  );
+
   Map<String, Object> toJson() {
     final json = <String, Object>{
       'skillName': skillName,
@@ -151,6 +161,14 @@ class GitUpdateCheckResult {
   final int checked;
   final int updates;
   final int failures;
+}
+
+class GitUpdateApplyResult {
+  const GitUpdateApplyResult({required this.records, this.updated = const [], this.failures = const {}});
+
+  final Map<String, GitSourceRecord> records;
+  final List<String> updated;
+  final Map<String, String> failures;
 }
 
 class GitImportResult {

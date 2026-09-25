@@ -11,6 +11,7 @@ import 'agents_sheet.dart';
 import 'import_sheet.dart';
 import 'modal.dart';
 import 'git_import_sheet.dart';
+import 'git_updates_sheet.dart';
 import 'preview_pane.dart';
 import 'scope.dart';
 import 'sidebar.dart';
@@ -155,8 +156,8 @@ class _CabinetShellState extends State<CabinetShell> {
                   onSelected: controller.refresh,
                 ),
                 PlatformMenuItem(
-                  label: 'Check Git Updates',
-                  onSelected: controller.gitSources.isEmpty ? null : controller.checkGitUpdates,
+                  label: 'Manage Git Updates…',
+                  onSelected: controller.gitSources.isEmpty ? null : () => showGitUpdatesSheet(context),
                 ),
               ],
             ),
@@ -274,9 +275,9 @@ class _CabinetShellState extends State<CabinetShell> {
             entries: [
               ContextMenuEntry('Refresh', onSelected: controller.refresh),
               ContextMenuEntry(
-                'Check for Git Updates',
+                'Manage Git Updates…',
                 enabled: controller.gitSources.isNotEmpty,
-                onSelected: controller.checkGitUpdates,
+                onSelected: () => showGitUpdatesSheet(context),
               ),
             ],
           ),
