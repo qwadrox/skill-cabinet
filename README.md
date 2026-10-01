@@ -31,8 +31,8 @@ The cabinet stores the original skill folders in `~/.skill-cabinet` and links en
 
 ## Getting started on macOS
 
-1. Download or build **Skill Cabinet**.
-2. Open the app.
+1. Download the macOS DMG from [GitHub Releases](https://github.com/qwadrox/skill-cabinet/releases), or build **Skill Cabinet** from source. The release download supports Apple Silicon and Intel Macs.
+2. Open the DMG and drag **Skill Cabinet.app** onto the **Applications** shortcut. Eject the disk image, then open the app from Applications. Releases are not signed with an Apple Developer ID or notarized. If macOS blocks the app, try opening it once, then go to **System Settings → Privacy & Security → Open Anyway**.
 3. Add the agents you use from **Manage agents**.
 4. Choose **Import Skill Folder…** and select a folder containing `SKILL.md`.
 5. Create a collection, add skills to it, and enable that collection for an agent.
@@ -71,6 +71,19 @@ Run the test suite with:
 ```sh
 fvm flutter test
 ```
+
+## Publishing a release
+
+The [macOS release workflow](.github/workflows/release-macos.yml) runs when a version tag such as `v1.0.0` is pushed. It installs the Flutter version from `.fvmrc`, runs the tests, builds a universal macOS app, and publishes a DMG in GitHub Releases with generated release notes. The DMG includes a compact branded window with the app and an Applications shortcut. Its background and Finder layout are defined in `tool/dmg/`. No Apple account or signing secrets are required.
+
+After committing and pushing the changes you want to release:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Use a new `vMAJOR.MINOR.PATCH` tag for each release. The tag sets the app version, overriding `pubspec.yaml` for that build. Monitor the run in the repository's **Actions** tab; the download appears in **Releases** after the tests and build succeed. A rerun of the same tag replaces its existing DMG.
 
 ## Data and privacy
 

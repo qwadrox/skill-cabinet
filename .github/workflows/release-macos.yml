@@ -1,0 +1,81 @@
+name: Release macOS app
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate version tag
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo 'Release tags must have the form v1.2.3.' >&2
+            exit 1
+          fi
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version-file: .fvmrc
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build release app
+        run: flutter build macos --release --build-name="${RELEASE_TAG#v}" --build-number="$GITHUB_RUN_NUMBER"
+
+      - name: Package universal DMG
+        shell: bash
+        run: |
+          app='build/macos/Build/Products/Release/Skill Cabinet.app'
+          lipo "$app/Contents/MacOS/Skill Cabinet" -verify_arch arm64 x86_64
+          mkdir -p dist
+          python3 -m venv "$RUNNER_TEMP/dmg-tools"
+          "$RUNNER_TEMP/dmg-tools/bin/pip" install dmgbuild==1.6.7
+          swift tool/dmg/background.swift "$RUNNER_TEMP/dmg-background.tiff"
+          "$RUNNER_TEMP/dmg-tools/bin/dmgbuild" \
+            -s tool/dmg/settings.py \
+            -D app="$app" -D background="$RUNNER_TEMP/dmg-background.tiff" \
+            'Skill Cabinet' "dist/Skill-Cabinet-${RELEASE_TAG}-macos-universal.dmg"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          macOS universal build (Apple Silicon and Intel).
+
+          This app is not signed with an Apple Developer ID or notarized. If macOS blocks it, try opening it once, then go to System Settings → Privacy & Security → Open Anyway.
+          NOTES
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*.dmg --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/*.dmg \
+              --verify-tag \
+              --title "Skill Cabinet $RELEASE_TAG" \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
+              --generate-notes
+          fi
