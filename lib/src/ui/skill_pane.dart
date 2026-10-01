@@ -210,7 +210,14 @@ class _NoticeBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final error = text.startsWith('Error');
-    final tint = context.resolve(error ? MacosColors.systemRedColor : MacosColors.systemOrangeColor);
+    final updateAvailable = text.endsWith('Git update available') || text.endsWith('Git updates available');
+    final tint = context.resolve(
+      error
+          ? MacosColors.systemRedColor
+          : updateAvailable
+          ? MacosColors.systemBlueColor
+          : MacosColors.systemOrangeColor,
+    );
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
@@ -222,7 +229,11 @@ class _NoticeBanner extends StatelessWidget {
       child: Row(
         children: [
           MacosIcon(
-            error ? CupertinoIcons.xmark_octagon : CupertinoIcons.exclamationmark_triangle,
+            error
+                ? CupertinoIcons.xmark_octagon
+                : updateAvailable
+                ? CupertinoIcons.info_circle
+                : CupertinoIcons.exclamationmark_triangle,
             size: 14,
             color: tint,
           ),
