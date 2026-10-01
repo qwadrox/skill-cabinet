@@ -72,6 +72,8 @@ void main() {
       revision: revision,
     );
     writeJsonAtomic(paths.gitSourcesFile, {'example': record.toJson()});
+    final local = Directory(p.join(paths.storeDir, 'example'))..createSync(recursive: true);
+    File(p.join(local.path, 'SKILL.md')).writeAsStringSync('# first\n');
     final first = await GitImportService(paths).checkForUpdates(force: true);
     expect(first.checked, 1);
     expect(first.records['example']?.state, GitTrackingState.upToDate);

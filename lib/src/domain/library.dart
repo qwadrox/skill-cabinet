@@ -6,6 +6,7 @@
 //   ~/.skill-cabinet/skills/<name>/SKILL.md
 
 import 'health.dart';
+import 'notice.dart';
 
 const cabinetDirName = '.skill-cabinet';
 
@@ -22,7 +23,7 @@ class LibrarySnapshot {
     required this.rootPath,
     required this.skills,
     this.issues = const [],
-    this.notice = '',
+    this.notice = Notice.none,
   });
 
   static const empty = LibrarySnapshot(root: '', rootPath: '', skills: []);
@@ -33,7 +34,7 @@ class LibrarySnapshot {
   final List<LibrarySkill> skills;
   // Store entries the cabinet cannot deploy, reported but never touched.
   final List<HealthIssue> issues;
-  final String notice;
+  final Notice notice;
 
   bool has(String name) => skills.any((s) => s.name == name);
 }
@@ -75,13 +76,13 @@ class SkillCandidate {
 
 // The result of searching dropped or picked folders for skills.
 class ImportScan {
-  const ImportScan({required this.candidates, this.notice = ''});
+  const ImportScan({required this.candidates, this.notice = Notice.none});
 
   static const empty = ImportScan(candidates: []);
 
   final List<SkillCandidate> candidates;
   // Why nothing (or not everything) was found; empty when fine.
-  final String notice;
+  final Notice notice;
 
   bool get isEmpty => candidates.isEmpty;
   // Exactly one skill, and the user pointed straight at it.

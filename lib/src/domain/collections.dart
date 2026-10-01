@@ -1,6 +1,8 @@
 // Collections: named skill sets. Members are skill names; a name the
 // Library no longer has is simply not shown. Knows nothing about agents.
 
+import 'notice.dart';
+
 // Sets get one of setColorCount palette slots when created.
 const setColorCount = 6;
 
@@ -16,12 +18,12 @@ class SkillSet {
 }
 
 class CollectionsSnapshot {
-  const CollectionsSnapshot({required this.sets, this.notice = ''});
+  const CollectionsSnapshot({required this.sets, this.notice = Notice.none});
 
   static const empty = CollectionsSnapshot(sets: []);
 
   final List<SkillSet> sets;
-  final String notice;
+  final Notice notice;
 
   SkillSet? named(String name) {
     for (final set in sets) {

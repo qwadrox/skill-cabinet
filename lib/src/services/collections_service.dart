@@ -11,6 +11,7 @@
 import '../domain/collections.dart';
 import 'cabinet_paths.dart';
 import 'fs_util.dart';
+import '../domain/notice.dart';
 
 class _StoredSet {
   _StoredSet(this.name, this.skills, this.color);
@@ -27,13 +28,13 @@ class CollectionsService {
 
   final CabinetPaths paths;
 
-  CollectionsSnapshot list() => _snapshot(_read(), '');
+  CollectionsSnapshot list() => _snapshot(_read(), Notice.none);
 
   CollectionsSnapshot createSet(String rawName) {
     final state = _read();
     final name = rawName.trim();
-    if (name.isEmpty) return _snapshot(state, '');
-    if (_find(state, name) != null) return _snapshot(state, 'Skill set "$name" already exists');
+    if (name.isEmpty) return _snapshot(state, Notice.none);
+    if (_find(state, name) != null) return _snapshot(state, Notice.warning('Skill set "$name" already exists'));
     state.add(_StoredSet(name, [], _leastUsedColor(state)));
     return _commit(state);
   }
@@ -46,11 +47,11 @@ class CollectionsService {
   CollectionsSnapshot renameSet(String oldName, String rawName) {
     final state = _read();
     final set = _find(state, oldName);
-    if (set == null) return _snapshot(state, 'Skill set not found');
+    if (set == null) return _snapshot(state, Notice.warning('Skill set not found'));
     final name = rawName.trim();
-    if (name.isEmpty) return _snapshot(state, 'Give the skill set a name.');
-    if (name == oldName) return _snapshot(state, '');
-    if (_find(state, name) != null) return _snapshot(state, 'Skill set "$name" already exists');
+    if (name.isEmpty) return _snapshot(state, Notice.warning('Give the skill set a name.'));
+    if (name == oldName) return _snapshot(state, Notice.none);
+    if (_find(state, name) != null) return _snapshot(state, Notice.warning('Skill set "$name" already exists'));
     set.name = name;
     return _commit(state);
   }
@@ -58,7 +59,7 @@ class CollectionsService {
   CollectionsSnapshot setMembership(String setName, String skill, {required bool member}) {
     final state = _read();
     final set = _find(state, setName);
-    if (set == null) return _snapshot(state, 'Skill set not found');
+    if (set == null) return _snapshot(state, Notice.warning('Skill set not found'));
     final has = set.skills.contains(skill);
     if (member && !has) set.skills.add(skill);
     if (!member && has) set.skills = set.skills.where((s) => s != skill).toList();
@@ -101,9 +102,9 @@ class CollectionsService {
       writeJsonAtomic(paths.collectionsFile, {
         'groups': [for (final s in state) s.toJson()],
       });
-      return _snapshot(state, '');
+      return _snapshot(state, Notice.none);
     } catch (e) {
-      return _snapshot(_read(), 'Error: $e');
+      return _snapshot(_read(), Notice.error('Error: $e'));
     }
   }
 
@@ -128,7 +129,7 @@ class CollectionsService {
     return best;
   }
 
-  static CollectionsSnapshot _snapshot(List<_StoredSet> state, String notice) => CollectionsSnapshot(
+  static CollectionsSnapshot _snapshot(List<_StoredSet> state, Notice notice) => CollectionsSnapshot(
     sets: [for (final s in state) SkillSet(name: s.name, skills: List.unmodifiable(s.skills), color: s.color)],
     notice: notice,
   );

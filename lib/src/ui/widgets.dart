@@ -148,6 +148,18 @@ List<(String, List<T>)> groupByFolder<T>(Iterable<T> items, String Function(T it
   return [for (final entry in groups.entries) (entry.key, entry.value)];
 }
 
+// Shallowest folder first: a repository's main skills folder before add-ons
+// nested deeper.
+extension FolderGroups<T> on List<(String, List<T>)> {
+  void sortShallowestFirst() {
+    int depth(String folder) => folder.split('/').length;
+    sort((a, b) {
+      final byDepth = depth(a.$1).compareTo(depth(b.$1));
+      return byDepth != 0 ? byDepth : a.$1.compareTo(b.$1);
+    });
+  }
+}
+
 // Heads the skills an import found in one folder, so the path is written
 // once for the group rather than on every row.
 class FolderHeader extends StatelessWidget {
@@ -382,7 +394,9 @@ class EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+    // As tall as its content, so a dialog showing it shrinks to fit.
     child: Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         MacosIcon(icon, size: 34, color: context.tertiaryLabel),
         const SizedBox(height: 12),

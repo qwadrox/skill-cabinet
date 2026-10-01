@@ -21,7 +21,7 @@ AI agent skills are often scattered across several hidden folders. Skill Cabinet
 - Group related skills into collections such as *Writing*, *Research*, or *Development*.
 - Turn collections or individual skills on and off for each agent.
 - Keep agent skill folders synchronized with links managed by the cabinet.
-- Track Git-imported skills, review available revisions, and update selected skills in place.
+- Track Git-imported skills, review file changes against your local copy, and update selected skills in place.
 - See problems, such as missing or conflicting skills, without silently changing files you do not own.
 - Back up the whole cabinet automatically to a Git history, optionally pushed to a repository you own, and restore it on a new Mac.
 

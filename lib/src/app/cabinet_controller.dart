@@ -16,6 +16,7 @@ import '../domain/collections.dart';
 import '../domain/deployment.dart';
 import '../domain/git_import.dart';
 import '../domain/library.dart';
+import '../domain/notice.dart';
 import '../services/backup_service.dart';
 import '../services/cabinet_paths.dart';
 import 'backend.dart';
@@ -62,7 +63,7 @@ class CabinetController extends ChangeNotifier {
   // once read (null while loading, never another skill's).
   String? previewName;
   SkillPreview? preview;
-  String notice = '';
+  Notice notice = Notice.none;
   bool checkingGitUpdates = false;
   bool applyingGitUpdates = false;
   BackupStatus backup = BackupStatus.empty;
@@ -162,19 +163,19 @@ class CabinetController extends ChangeNotifier {
   }
 
   void _failed(Object error) {
-    notice = 'Error: $error';
+    notice = Notice.error('Error: $error');
     notifyListeners();
   }
 
   // A result's notice replaces the current one only when it says something,
   // so the other contexts' empty notices don't wipe it.
-  void _noticed(String text) {
+  void _noticed(Notice text) {
     if (text.isNotEmpty) notice = text;
   }
 
   // A user intent that reaches a service clears the previous notice.
   void _clearNotice() {
-    notice = '';
+    notice = Notice.none;
     notifyListeners();
   }
 
@@ -303,14 +304,14 @@ class CabinetController extends ChangeNotifier {
     if (checkingGitUpdates) return;
     if (gitSources.isEmpty) {
       if (!quiet) {
-        notice = 'No Git-tracked skills to check';
+        notice = const Notice.info('No Git-tracked skills to check');
         notifyListeners();
       }
       return;
     }
     checkingGitUpdates = true;
     if (!quiet) {
-      notice = 'Checking Git repositories for updates…';
+      notice = const Notice.info('Checking Git repositories for updates…');
       notifyListeners();
     }
     try {
@@ -318,28 +319,35 @@ class CabinetController extends ChangeNotifier {
       gitSources = result.records;
       if (!quiet || result.updates > 0 || result.failures > 0) {
         notice = switch ((result.updates, result.failures)) {
-          (final updates, 0) when updates > 0 => '$updates Git update${updates == 1 ? '' : 's'} available',
-          (0, final failures) when failures > 0 =>
+          // Failed checks are listed in the review sheet alongside available updates.
+          (final updates, _) when updates > 0 => Notice.info('$updates Git update${updates == 1 ? '' : 's'} available'),
+          (0, final failures) when failures > 0 => Notice.warning(
             'Could not check $failures Git ${failures == 1 ? 'repository' : 'repositories'}',
-          _ => 'All Git-tracked skills are up to date',
+          ),
+          _ => const Notice.info('All Git-tracked skills are up to date'),
         };
       }
     } catch (e) {
-      if (!quiet) notice = 'Error checking Git updates: $e';
+      if (!quiet) notice = Notice.error('Error checking Git updates: $e');
     } finally {
       checkingGitUpdates = false;
       notifyListeners();
     }
   }
 
-  Future<GitUpdateApplyResult> applyGitUpdates(Iterable<String> skillNames) async {
+  Future<GitUpdatePreview> previewGitUpdate(String skillName) => _backend.previewGitUpdate(skillName);
+
+  Future<GitUpdateApplyResult> applyGitUpdates(
+    Iterable<String> skillNames, {
+    Map<String, String> reviewedRevisions = const {},
+  }) async {
     final names = skillNames.toSet().toList();
     if (names.isEmpty || applyingGitUpdates) return GitUpdateApplyResult(records: gitSources);
     _clearNotice();
     applyingGitUpdates = true;
     notifyListeners();
     try {
-      final result = await _backend.applyGitUpdates(names);
+      final result = await _backend.applyGitUpdates(names, reviewedRevisions: reviewedRevisions);
       gitSources = result.records;
       _libraryLoaded(await _backend.scan());
       final previewed = previewName;
@@ -347,13 +355,13 @@ class CabinetController extends ChangeNotifier {
         _previewLoaded(await _backend.preview(previewed));
       }
       notice = switch ((result.updated.length, result.failures.length)) {
-        (final count, 0) => 'Updated $count Git-tracked skill${count == 1 ? '' : 's'}',
-        (0, final count) => 'Could not update $count skill${count == 1 ? '' : 's'}',
-        (final done, final failed) => 'Updated $done skill${done == 1 ? '' : 's'} · $failed failed',
+        (final count, 0) => Notice.info('Updated $count Git-tracked skill${count == 1 ? '' : 's'}'),
+        (0, final count) => Notice.error('Could not update $count skill${count == 1 ? '' : 's'}'),
+        (final done, final failed) => Notice.warning('Updated $done skill${done == 1 ? '' : 's'} · $failed failed'),
       };
       return result;
     } catch (error) {
-      notice = 'Error applying Git updates: $error';
+      notice = Notice.error('Error applying Git updates: $error');
       return GitUpdateApplyResult(records: gitSources, failures: {for (final name in names) name: error.toString()});
     } finally {
       applyingGitUpdates = false;
@@ -391,7 +399,7 @@ class CabinetController extends ChangeNotifier {
         gitSources = sources;
         notifyListeners();
       } catch (e) {
-        _noticed('Skill deleted, but Git tracking could not be cleared: $e');
+        _noticed(Notice.warning('Skill deleted, but Git tracking could not be cleared: $e'));
       }
       // The folder is gone: drop the name from every skill set and agent,
       // which also removes its now-dangling agent links.
@@ -616,7 +624,7 @@ class CabinetController extends ChangeNotifier {
       backup = await _backend.adoptBackupRemote(url.trim());
       backupError = '';
       await load();
-      notice = 'Restored the backup from ${backup.remote}';
+      notice = Notice.info('Restored the backup from ${backup.remote}');
       notifyListeners();
     } catch (e) {
       _failed(e);
@@ -639,7 +647,7 @@ class CabinetController extends ChangeNotifier {
     try {
       backup = await _backend.restoreBackup(entry.id);
       await load();
-      notice = 'Restored the backup of ${backupDateLabel(entry.date)}';
+      notice = Notice.info('Restored the backup of ${backupDateLabel(entry.date)}');
       notifyListeners();
       if (backup.hasRemote) unawaited(backUpNow());
     } catch (e) {

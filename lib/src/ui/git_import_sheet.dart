@@ -214,13 +214,8 @@ class _GitImportSheetState extends State<_GitImportSheet> {
     if (groups.length == 1 && _candidates.length == 1 && _candidates.single.repositoryPath.isEmpty) {
       return [('', groups.single.$2)];
     }
-    // Shallowest first: the main skills folder before add-ons nested
-    // deeper, whose copies are the alternatives.
-    int depth(String folder) => folder.split('/').length;
-    return groups..sort((a, b) {
-      final byDepth = depth(a.$1).compareTo(depth(b.$1));
-      return byDepth != 0 ? byDepth : a.$1.compareTo(b.$1);
-    });
+    // The add-ons nested deeper hold the alternative copies.
+    return groups..sortShallowestFirst();
   }
 
   Widget _row(GitSkillCandidate candidate, Color warning) => HoverRow(

@@ -2,6 +2,7 @@
 // Knows skills only by name; set membership is joined in the view layer.
 
 import 'health.dart';
+import 'notice.dart';
 
 // An agent the user added.
 class Agent {
@@ -87,7 +88,7 @@ class DeploymentSnapshot {
     required this.catalog,
     required this.foreign,
     this.issues = const [],
-    this.notice = '',
+    this.notice = Notice.none,
   });
 
   static const empty = DeploymentSnapshot(agents: [], catalog: [], foreign: []);
@@ -98,7 +99,7 @@ class DeploymentSnapshot {
   final List<ForeignSkill> foreign;
   // What reconciliation could not carry out, reported but never forced.
   final List<HealthIssue> issues;
-  final String notice;
+  final Notice notice;
 
   Agent? agent(String key) {
     for (final a in agents) {

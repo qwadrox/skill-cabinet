@@ -65,6 +65,7 @@ class GitSourceRecord {
     this.lastCheckedAt,
     this.remoteRevision,
     this.lastCheckError,
+    this.hasContentChanges,
   });
 
   final String skillName;
@@ -75,11 +76,13 @@ class GitSourceRecord {
   final DateTime? lastCheckedAt;
   final String? remoteRevision;
   final String? lastCheckError;
+  // Null for older repository-only checks; those must be checked against files.
+  final bool? hasContentChanges;
 
   GitTrackingState get state {
     if (lastCheckError != null) return GitTrackingState.error;
-    if (remoteRevision == null) return GitTrackingState.tracked;
-    return remoteRevision == revision ? GitTrackingState.upToDate : GitTrackingState.updateAvailable;
+    if (hasContentChanges == null) return GitTrackingState.tracked;
+    return hasContentChanges! ? GitTrackingState.updateAvailable : GitTrackingState.upToDate;
   }
 
   String get statusLabel => switch (state) {
@@ -89,16 +92,18 @@ class GitSourceRecord {
     GitTrackingState.error => 'Update check failed',
   };
 
-  GitSourceRecord withCheck({DateTime? checkedAt, String? remote, String? error}) => GitSourceRecord(
-    skillName: skillName,
-    sourceUrl: sourceUrl,
-    ref: ref,
-    repositoryPath: repositoryPath,
-    revision: revision,
-    lastCheckedAt: checkedAt,
-    remoteRevision: remote ?? remoteRevision,
-    lastCheckError: error,
-  );
+  GitSourceRecord withCheck({DateTime? checkedAt, String? remote, String? error, bool? contentChanges}) =>
+      GitSourceRecord(
+        skillName: skillName,
+        sourceUrl: sourceUrl,
+        ref: ref,
+        repositoryPath: repositoryPath,
+        revision: revision,
+        lastCheckedAt: checkedAt,
+        remoteRevision: remote ?? remoteRevision,
+        lastCheckError: error,
+        hasContentChanges: contentChanges ?? hasContentChanges,
+      );
 
   GitSourceRecord withRevision(String value, {required DateTime updatedAt}) => GitSourceRecord(
     skillName: skillName,
@@ -108,6 +113,7 @@ class GitSourceRecord {
     revision: value,
     lastCheckedAt: updatedAt,
     remoteRevision: value,
+    hasContentChanges: false,
   );
 
   Map<String, Object> toJson() {
@@ -124,6 +130,8 @@ class GitSourceRecord {
     if (remote != null) json['remoteRevision'] = remote;
     final error = lastCheckError;
     if (error != null) json['lastCheckError'] = error;
+    final changes = hasContentChanges;
+    if (changes != null) json['hasContentChanges'] = changes;
     return json;
   }
 
@@ -148,11 +156,31 @@ class GitSourceRecord {
       lastCheckedAt: DateTime.tryParse(text('lastCheckedAt') ?? ''),
       remoteRevision: text('remoteRevision'),
       lastCheckError: text('lastCheckError'),
+      hasContentChanges: value['hasContentChanges'] is bool ? value['hasContentChanges'] as bool : null,
     );
   }
 }
 
 enum GitTrackingState { tracked, upToDate, updateAvailable, error }
+
+class GitUpdatePreview {
+  const GitUpdatePreview({required this.revision, required this.files});
+
+  final String revision;
+  final List<GitFileChange> files;
+}
+
+enum GitFileChangeKind { added, modified, deleted }
+
+class GitFileChange {
+  const GitFileChange({required this.path, required this.kind, required this.diff, this.message});
+
+  final String path;
+  final GitFileChangeKind kind;
+  final String diff;
+  // Binary or large files can be compared without rendering their contents.
+  final String? message;
+}
 
 class GitUpdateCheckResult {
   const GitUpdateCheckResult({required this.records, required this.checked, required this.updates, this.failures = 0});

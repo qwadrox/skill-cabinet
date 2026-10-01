@@ -14,6 +14,7 @@ import '../domain/health.dart';
 import '../domain/library.dart';
 import 'cabinet_paths.dart';
 import 'fs_util.dart';
+import '../domain/notice.dart';
 
 class LibraryService {
   const LibraryService(this.paths);
@@ -23,9 +24,9 @@ class LibraryService {
   LibrarySnapshot scan() {
     try {
       Directory(paths.storeDir).createSync(recursive: true);
-      return _snapshot('');
+      return _snapshot(Notice.none);
     } catch (e) {
-      return _snapshot('Error: $e');
+      return _snapshot(Notice.error('Error: $e'));
     }
   }
 
@@ -67,7 +68,7 @@ class LibraryService {
     }
     if (candidates.isNotEmpty) return ImportScan(candidates: candidates);
     final what = missing.length == 1 && searched <= 1 ? '“${missing.first}”' : 'the dropped folders';
-    return ImportScan(candidates: const [], notice: 'No skill folder (a folder with a SKILL.md) found in $what');
+    return ImportScan(candidates: const [], notice: Notice.warning('No skill folder (a folder with a SKILL.md) found in $what'));
   }
 
   // Imports skill folders. `move` takes them out of where they were
@@ -113,23 +114,23 @@ class LibraryService {
 
   // What the window says after an import. One thing gone wrong is worth
   // spelling out; several are counted, since the notice is a single line.
-  String _importNotice(List<String> imported, List<String> problems) {
+  Notice _importNotice(List<String> imported, List<String> problems) {
     final done = switch (imported.length) {
       0 => '',
       1 => 'Imported ${imported.first}',
       _ => 'Imported ${imported.length} skills',
     };
-    if (problems.isEmpty) return done;
+    if (problems.isEmpty) return Notice.info(done);
     final failed = problems.length == 1 ? problems.first : '${problems.length} skills could not be imported';
-    return done.isEmpty ? failed : '$done · $failed';
+    return Notice.warning(done.isEmpty ? failed : '$done · $failed');
   }
 
   // Permanently removes a skill folder from the store. Agent links and
   // skill-set memberships are cleared by the other contexts afterwards.
   LibraryDeleteResult deleteSkill(String name) {
     final target = p.join(paths.storeDir, name);
-    if (!isPlainName(name)) return LibraryDeleteResult(_snapshot('Invalid skill name "$name"'));
-    if (!lexists(target)) return LibraryDeleteResult(_snapshot('$name is not in the store'));
+    if (!isPlainName(name)) return LibraryDeleteResult(_snapshot(Notice.warning('Invalid skill name "$name"')));
+    if (!lexists(target)) return LibraryDeleteResult(_snapshot(Notice.warning('$name is not in the store')));
     try {
       if (isSymlink(target)) {
         Link(target).deleteSync();
@@ -137,9 +138,9 @@ class LibraryService {
         Directory(target).deleteSync(recursive: true);
       }
     } catch (e) {
-      return LibraryDeleteResult(_snapshot('Delete failed: $e'));
+      return LibraryDeleteResult(_snapshot(Notice.error('Delete failed: $e')));
     }
-    return LibraryDeleteResult(_snapshot('Deleted $name'), deleted: name);
+    return LibraryDeleteResult(_snapshot(Notice.info('Deleted $name')), deleted: name);
   }
 
   // Reads one skill's SKILL.md for the preview pane. Never writes.
@@ -228,7 +229,7 @@ class LibraryService {
     }
   }
 
-  LibrarySnapshot _snapshot(String notice) => LibrarySnapshot(
+  LibrarySnapshot _snapshot(Notice notice) => LibrarySnapshot(
     root: paths.tilde(paths.storeDir),
     rootPath: paths.storeDir,
     skills: [for (final name in _skillNames()) LibrarySkill(name: name, description: _description(name))],

@@ -6,6 +6,7 @@ import '../app/rows.dart';
 import '../domain/deployment.dart';
 import '../domain/git_import.dart';
 import '../domain/health.dart';
+import '../domain/notice.dart';
 import 'dialogs.dart';
 import 'git_updates_sheet.dart';
 import 'scope.dart';
@@ -201,23 +202,22 @@ class SkillPane extends StatelessWidget {
 }
 
 class _NoticeBanner extends StatelessWidget {
-  const _NoticeBanner(this.text, {required this.onDismiss, this.onReviewUpdates});
+  const _NoticeBanner(this.notice, {required this.onDismiss, this.onReviewUpdates});
 
-  final String text;
+  final Notice notice;
   final VoidCallback onDismiss;
   final VoidCallback? onReviewUpdates;
 
   @override
   Widget build(BuildContext context) {
-    final error = text.startsWith('Error');
+    final text = notice.text;
     final updateAvailable = text.endsWith('Git update available') || text.endsWith('Git updates available');
-    final tint = context.resolve(
-      error
-          ? MacosColors.systemRedColor
-          : updateAvailable
-          ? MacosColors.systemBlueColor
-          : MacosColors.systemOrangeColor,
-    );
+    final (tintColor, icon) = switch (notice.level) {
+      NoticeLevel.info => (MacosColors.systemBlueColor, CupertinoIcons.info_circle),
+      NoticeLevel.warning => (MacosColors.systemOrangeColor, CupertinoIcons.exclamationmark_triangle),
+      NoticeLevel.error => (MacosColors.systemRedColor, CupertinoIcons.xmark_octagon),
+    };
+    final tint = context.resolve(tintColor);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
@@ -228,18 +228,10 @@ class _NoticeBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          MacosIcon(
-            error
-                ? CupertinoIcons.xmark_octagon
-                : updateAvailable
-                ? CupertinoIcons.info_circle
-                : CupertinoIcons.exclamationmark_triangle,
-            size: 14,
-            color: tint,
-          ),
+          MacosIcon(icon, size: 14, color: tint),
           const SizedBox(width: 10),
           Expanded(child: Text(text, style: context.callout)),
-          if (onReviewUpdates != null) ...[
+          if (updateAvailable && onReviewUpdates != null) ...[
             PushButton(
               controlSize: ControlSize.small,
               secondary: true,

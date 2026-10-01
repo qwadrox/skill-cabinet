@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -8,6 +9,7 @@ import '../domain/library.dart';
 import 'cabinet_paths.dart';
 import 'fs_util.dart';
 import 'library_service.dart';
+import '../domain/notice.dart';
 
 class GitImportException implements Exception {
   const GitImportException(this.message);
@@ -169,13 +171,14 @@ class GitImportService {
       }
       var result = LibraryService(paths).importSkills(fresh, move: true);
       if (replacing.isNotEmpty) {
-        final notice = [
-          if (result.snapshot.notice.isNotEmpty) result.snapshot.notice,
+        final text = [
+          if (result.snapshot.notice.isNotEmpty) result.snapshot.notice.text,
           if (replaced.length == 1) 'Replaced ${replaced.first} with the Git version',
           if (replaced.length > 1) 'Replaced ${replaced.length} skills with their Git versions',
           if (problems.length == 1) problems.first,
           if (problems.length > 1) '${problems.length} skills could not be replaced',
         ].join(' · ');
+        final notice = problems.isEmpty ? Notice(text, result.snapshot.notice.level) : Notice.warning(text);
         result = LibraryImportResult(_withNotice(result.snapshot, notice), imported: [...result.imported, ...replaced]);
       }
       var saved = 0;
@@ -196,9 +199,11 @@ class GitImportService {
           _writeSources(records);
           saved = result.imported.length;
         } catch (error) {
-          final notice = result.snapshot.notice.isEmpty
-              ? 'Imported, but Git tracking could not be saved: $error'
-              : '${result.snapshot.notice} · Git tracking could not be saved: $error';
+          final notice = Notice.warning(
+            result.snapshot.notice.isEmpty
+                ? 'Imported, but Git tracking could not be saved: $error'
+                : '${result.snapshot.notice.text} · Git tracking could not be saved: $error',
+          );
           return GitImportResult(LibraryImportResult(_withNotice(result.snapshot, notice), imported: result.imported));
         }
       }
@@ -271,6 +276,7 @@ class GitImportService {
     for (final entry in records.entries) {
       final source = entry.value;
       if (!force &&
+          source.hasContentChanges != null &&
           source.lastCheckedAt != null &&
           now.difference(source.lastCheckedAt!.toUtc()) < const Duration(hours: 24)) {
         continue;
@@ -286,26 +292,38 @@ class GitImportService {
     }
 
     var failures = 0;
-    final remoteByGroup = <String, String>{};
-    final errorsByGroup = <String, String>{};
-    for (final entry in groups.entries) {
-      final skill = records[entry.value.first]!;
-      try {
-        remoteByGroup[entry.key] = await _remoteRevision(skill.sourceUrl, skill.ref);
-      } catch (error) {
-        failures++;
-        errorsByGroup[entry.key] = error.toString();
-      }
-    }
-
     final updated = <String, GitSourceRecord>{...records};
-    for (final entry in groups.entries) {
-      final remote = remoteByGroup[entry.key];
-      final error = errorsByGroup[entry.key];
-      for (final name in entry.value) {
-        final record = records[name]!;
-        updated[name] = record.withCheck(checkedAt: now, remote: remote, error: error);
+    for (final names in groups.values) {
+      final source = records[names.first]!;
+      final session = Directory.systemTemp.createTempSync(_tempPrefix);
+      final checkout = p.join(session.path, 'repository');
+      var failed = false;
+      try {
+        await _cloneSource(source, checkout);
+        final revision = _gitValue(checkout, ['rev-parse', 'HEAD']);
+        for (final name in names) {
+          final record = records[name]!;
+          try {
+            final (local, incoming) = _snapshotUpdate(name, record, checkout, session.path);
+            updated[name] = record.withCheck(
+              checkedAt: now,
+              remote: revision,
+              contentChanges: !_matchingFiles(local, incoming),
+            );
+          } catch (error) {
+            failed = true;
+            updated[name] = record.withCheck(checkedAt: now, remote: revision, error: error.toString());
+          }
+        }
+      } catch (error) {
+        failed = true;
+        for (final name in names) {
+          updated[name] = records[name]!.withCheck(checkedAt: now, error: error.toString());
+        }
+      } finally {
+        if (session.existsSync()) session.deleteSync(recursive: true);
       }
+      if (failed) failures++;
     }
     _writeSources(updated);
     return GitUpdateCheckResult(
@@ -316,10 +334,152 @@ class GitImportService {
     );
   }
 
+  // Review compares snapshots of the actual local folder and incoming folder.
+  // All temporary data is removed before returning; the cabinet is never edited.
+  Future<GitUpdatePreview> previewUpdate(String skillName) async {
+    if (!isPlainName(skillName)) throw const GitImportException('Invalid skill name');
+    final source = _readSources()[skillName];
+    if (source == null) throw const GitImportException('This skill is no longer Git-tracked');
+    final session = Directory.systemTemp.createTempSync(_tempPrefix);
+    final checkout = p.join(session.path, 'repository');
+    try {
+      await _cloneSource(source, checkout);
+      final revision = _gitValue(checkout, ['rev-parse', 'HEAD']);
+      final (local, incoming) = _snapshotUpdate(skillName, source, checkout, session.path);
+      final before = _filesAt(local);
+      final after = _filesAt(incoming);
+      final names = {...before.keys, ...after.keys}.toList()..sort();
+      final changes = <GitFileChange>[];
+      for (final name in names) {
+        final oldFile = before[name];
+        final newFile = after[name];
+        final oldBytes = oldFile?.readAsBytesSync() ?? const <int>[];
+        final newBytes = newFile?.readAsBytesSync() ?? const <int>[];
+        final sameContent = oldFile != null && newFile != null && _sameBytes(oldBytes, newBytes);
+        final wasExecutable = oldFile != null && oldFile.statSync().mode & 0x49 != 0;
+        final isExecutable = newFile != null && newFile.statSync().mode & 0x49 != 0;
+        if (sameContent && wasExecutable == isExecutable) continue;
+        final kind = oldFile == null
+            ? GitFileChangeKind.added
+            : newFile == null
+            ? GitFileChangeKind.deleted
+            : GitFileChangeKind.modified;
+        String? message;
+        var diff = '';
+        if (sameContent) {
+          message = isExecutable ? 'Executable permission added' : 'Executable permission removed';
+        } else if (oldBytes.contains(0) || newBytes.contains(0)) {
+          message = 'Binary file';
+        } else if (oldBytes.length + newBytes.length > 256 * 1024) {
+          message = 'File too large to preview';
+        } else if (!_isUtf8(oldBytes) || !_isUtf8(newBytes)) {
+          message = 'Binary file';
+        } else {
+          final result = await Process.run(_git, [
+            'diff',
+            '--no-index',
+            '--no-ext-diff',
+            '--no-textconv',
+            '--no-color',
+            '--',
+            oldFile?.path ?? '/dev/null',
+            newFile?.path ?? '/dev/null',
+          ], environment: _gitEnvironment);
+          if (result.exitCode != 0 && result.exitCode != 1) {
+            throw const GitImportException('Could not compare skill files');
+          }
+          // The file list supplies the path. Show only hunks and their lines.
+          final output = result.stdout.toString();
+          final start = RegExp(r'^@@ ', multiLine: true).firstMatch(output)?.start;
+          if (start != null) {
+            diff = output.substring(start);
+          } else if (output.startsWith('diff') && output.contains('Binary files')) {
+            message = 'Binary file';
+          } else {
+            message = kind == GitFileChangeKind.added ? 'Empty file added' : 'Empty file removed';
+          }
+        }
+        changes.add(GitFileChange(path: name, kind: kind, diff: diff, message: message));
+      }
+      changes.sort((a, b) {
+        if (a.path == 'SKILL.md') return -1;
+        if (b.path == 'SKILL.md') return 1;
+        return a.path.compareTo(b.path);
+      });
+      return GitUpdatePreview(revision: revision, files: changes);
+    } finally {
+      if (session.existsSync()) session.deleteSync(recursive: true);
+    }
+  }
+
+  (String, String) _snapshotUpdate(String name, GitSourceRecord source, String checkout, String session) {
+    if (!isPlainName(name)) throw const GitImportException('Invalid skill name');
+    final incoming = p.join(session, 'incoming', name);
+    final local = p.join(session, 'local', name);
+    _copyTreeSafe(_trackedSkill(checkout, source), incoming);
+    _copyTreeSafe(p.join(paths.storeDir, name), local);
+    return (local, incoming);
+  }
+
+  static Map<String, File> _filesAt(String root) => {
+    for (final file in Directory(root).listSync(recursive: true).whereType<File>())
+      p.relative(file.path, from: root): file,
+  };
+
+  static bool _matchingFiles(String local, String incoming) {
+    final before = _filesAt(local);
+    final after = _filesAt(incoming);
+    if (before.length != after.length) return false;
+    for (final entry in before.entries) {
+      final other = after[entry.key];
+      if (other == null || !_sameBytes(entry.value.readAsBytesSync(), other.readAsBytesSync())) return false;
+      if ((entry.value.statSync().mode & 0x49 != 0) != (other.statSync().mode & 0x49 != 0)) return false;
+    }
+    return true;
+  }
+
+  static bool _sameBytes(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  static bool _isUtf8(List<int> bytes) {
+    try {
+      utf8.decode(bytes);
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  Future<void> _cloneSource(GitSourceRecord source, String checkout) async {
+    final result = await Process.run(_git, [
+      '-c',
+      'http.lowSpeedLimit=1000',
+      '-c',
+      'http.lowSpeedTime=30',
+      'clone',
+      '--depth',
+      '1',
+      '--no-tags',
+      if (source.ref != 'HEAD') ...['--branch', source.ref],
+      '--',
+      source.sourceUrl,
+      checkout,
+    ], environment: _gitEnvironment).timeout(const Duration(seconds: 90));
+    if (result.exitCode != 0) throw GitImportException(_cloneError(result.stderr));
+  }
+
   // Replaces selected tracked skills from fresh shallow checkouts. Skills
   // from the same repository/ref share a checkout, so updating a large
   // collection does not clone the same repository once per skill.
-  Future<GitUpdateApplyResult> applyUpdates(Iterable<String> skillNames) async {
+  Future<GitUpdateApplyResult> applyUpdates(
+    Iterable<String> skillNames, {
+    Map<String, String> reviewedRevisions = const {},
+  }) async {
     final records = _readSources();
     final selected = skillNames.toSet().where(records.containsKey).toList();
     if (selected.isEmpty) return GitUpdateApplyResult(records: records);
@@ -338,33 +498,18 @@ class GitImportService {
       final session = Directory.systemTemp.createTempSync(_tempPrefix);
       final checkout = p.join(session.path, 'repository');
       try {
-        final args = <String>[
-          '-c',
-          'http.lowSpeedLimit=1000',
-          '-c',
-          'http.lowSpeedTime=30',
-          'clone',
-          '--depth',
-          '1',
-          '--no-tags',
-          if (source.ref != 'HEAD') ...['--branch', source.ref],
-          '--',
-          source.sourceUrl,
-          checkout,
-        ];
-        final clone = await Process.run(_git, args, environment: _gitEnvironment).timeout(const Duration(seconds: 90));
-        if (clone.exitCode != 0) throw GitImportException(_cloneError(clone.stderr));
+        await _cloneSource(source, checkout);
         final revision = _gitValue(checkout, ['rev-parse', 'HEAD']);
         final staging = Directory(p.join(session.path, 'selected'))..createSync();
 
         for (final name in names) {
           final record = records[name]!;
           try {
-            final relative = record.repositoryPath;
-            final candidate = relative.isEmpty || relative == '.'
-                ? checkout
-                : p.joinAll([checkout, ...p.posix.split(relative)]);
-            final skill = _validatedCandidate(checkout, candidate);
+            final reviewed = reviewedRevisions[name];
+            if (reviewed != null && reviewed != revision) {
+              throw const GitImportException('The remote changed since review. Review the changes again.');
+            }
+            final skill = _trackedSkill(checkout, record);
             final staged = p.join(staging.path, name);
             _copyTreeSafe(skill, staged);
             _replaceInStore(name, staged);
@@ -385,26 +530,6 @@ class GitImportService {
 
     if (updated.isNotEmpty) _writeSources(nextRecords);
     return GitUpdateApplyResult(records: nextRecords, updated: updated, failures: failures);
-  }
-
-  Future<String> _remoteRevision(String sourceUrl, String ref) async {
-    final remoteRef = ref == 'HEAD' ? 'HEAD' : 'refs/heads/$ref';
-    final result = await Process.run(_git, [
-      '-c',
-      'http.lowSpeedLimit=1000',
-      '-c',
-      'http.lowSpeedTime=30',
-      'ls-remote',
-      sourceUrl,
-      remoteRef,
-    ], environment: _gitEnvironment).timeout(const Duration(seconds: 45));
-    if (result.exitCode != 0) throw GitImportException(_cloneError(result.stderr));
-    final line = result.stdout.toString().trim().split('\n').first.trim();
-    final revision = line.split(RegExp(r'\s+')).first;
-    if (!RegExp(r'^[0-9a-fA-F]{40,64}$').hasMatch(revision)) {
-      throw const GitImportException('The remote branch could not be resolved');
-    }
-    return revision;
   }
 
   Map<String, String> get _gitEnvironment => {...Platform.environment, 'GIT_TERMINAL_PROMPT': '0'};
@@ -445,6 +570,18 @@ class GitImportService {
       throw const GitImportException('Invalid Git preview directory');
     }
     return session;
+  }
+
+  // The remote can still be reachable while the tracked folder was moved or
+  // deleted upstream; say so instead of surfacing a filesystem error.
+  String _trackedSkill(String checkout, GitSourceRecord source) {
+    final relative = source.repositoryPath;
+    final atRoot = relative.isEmpty || relative == '.';
+    final candidate = atRoot ? checkout : p.joinAll([checkout, ...p.posix.split(relative)]);
+    if (!Directory(candidate).existsSync()) {
+      throw GitImportException('"$relative" no longer exists on ${source.ref}. It was moved or removed upstream.');
+    }
+    return _validatedCandidate(checkout, candidate);
   }
 
   String _validatedCandidate(String checkoutPath, String candidatePath) {
@@ -573,7 +710,7 @@ class GitImportService {
     writeJsonAtomic(paths.gitSourcesFile, {for (final entry in records.entries) entry.key: entry.value.toJson()});
   }
 
-  LibrarySnapshot _withNotice(LibrarySnapshot snapshot, String notice) => LibrarySnapshot(
+  LibrarySnapshot _withNotice(LibrarySnapshot snapshot, Notice notice) => LibrarySnapshot(
     root: snapshot.root,
     rootPath: snapshot.rootPath,
     skills: snapshot.skills,

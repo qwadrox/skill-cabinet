@@ -48,7 +48,7 @@ void main() {
       Directory(p.join(outside, 'empty')).createSync();
       final bad = lib.importSkill(p.join(outside, 'empty'), move: false);
       expect(bad.imported, isEmpty);
-      expect(bad.snapshot.notice, contains('not a skill folder'));
+      expect(bad.snapshot.notice.text, contains('not a skill folder'));
     });
 
     test('moves agent folders into the store', () {
@@ -75,7 +75,7 @@ void main() {
 
       final result = lib.importSkills([for (final c in scan.candidates) c.path], move: true);
       expect(result.imported, ['deploy']);
-      expect(result.snapshot.notice, contains('already in the store'));
+      expect(result.snapshot.notice.text, contains('already in the store'));
       expect(Directory(p.join(project, '.claude/skills/deploy')).existsSync(), isFalse);
       expect(Directory(p.join(project, '.agents/review')).existsSync(), isTrue);
     });
@@ -94,7 +94,7 @@ void main() {
       final empty = Directory(p.join(home.path, 'Empty'))..createSync();
       final scan = LibraryService(paths).scanForImport([empty.path]);
       expect(scan.isEmpty, isTrue);
-      expect(scan.notice, contains('Empty'));
+      expect(scan.notice.text, contains('Empty'));
     });
 
     test('deletes only plain names', () {
@@ -129,7 +129,7 @@ void main() {
       final c = CollectionsService(paths);
       c.createSet(' Web ');
       c.createSet('Data');
-      expect(c.createSet('Web').notice, contains('already exists'));
+      expect(c.createSet('Web').notice.text, contains('already exists'));
       var snap = c.setMembership('Web', 'pdf', member: true);
       snap = c.setMembership('Web', 'pdf', member: true);
       expect(snap.named('Web')!.skills, ['pdf']);
@@ -151,7 +151,7 @@ void main() {
       expect(renamed.named('Web'), isNull);
       expect(renamed.named('Platform')!.skills, ['pdf']);
       expect(renamed.named('Platform')!.color, 0);
-      expect(c.renameSet('Platform', 'Data').notice, contains('already exists'));
+      expect(c.renameSet('Platform', 'Data').notice.text, contains('already exists'));
       expect(c.list().sets.map((set) => set.name), ['Platform', 'Data']);
     });
 
@@ -215,10 +215,10 @@ void main() {
 
     test('refuses a custom agent without a name, or on a taken or bad folder', () {
       final d = DeploymentService(paths)..sync();
-      expect(d.addCustomAgent('  ', '~/x/skills').notice, contains('name'));
-      expect(d.addCustomAgent('X', '  ').notice, contains('folder'));
-      expect(d.addCustomAgent('X', '.claude/skills').notice, contains('same folder as Claude Code'));
-      expect(d.addCustomAgent('X', '.skill-cabinet/skills/inner').notice, contains('inside the library'));
+      expect(d.addCustomAgent('  ', '~/x/skills').notice.text, contains('name'));
+      expect(d.addCustomAgent('X', '  ').notice.text, contains('folder'));
+      expect(d.addCustomAgent('X', '.claude/skills').notice.text, contains('same folder as Claude Code'));
+      expect(d.addCustomAgent('X', '.skill-cabinet/skills/inner').notice.text, contains('inside the library'));
       expect(d.sync().agents.map((a) => a.key), ['claude']);
     });
 
@@ -290,7 +290,7 @@ void main() {
     test('adds and removes agents, refusing shared folders', () {
       final d = DeploymentService(paths)..sync();
       expect(d.addAgent('cline').agents.map((a) => a.key), ['claude', 'cline']);
-      expect(d.addAgent('warp').notice, contains('same folder as Cline'));
+      expect(d.addAgent('warp').notice.text, contains('same folder as Cline'));
       d.setAgentSkill('cline', 'pdf', enabled: true);
       final clineLink = p.join(home.path, '.agents/skills/pdf');
       expect(Link(clineLink).existsSync(), isTrue);

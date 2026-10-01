@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:macos_ui/macos_ui.dart';
 
 import '../domain/deployment.dart';
+import '../domain/notice.dart';
 
 import 'modal.dart';
 import 'scope.dart';
@@ -28,7 +29,7 @@ class _AgentsSheetState extends State<_AgentsSheet> {
   String _query = '';
   // The notice is app-wide; one already showing when the sheet opened came
   // from elsewhere and is left to the pane's banner.
-  late final String _staleNotice;
+  late final Notice _staleNotice;
 
   @override
   void initState() {
@@ -136,10 +137,16 @@ class _AgentsSheetState extends State<_AgentsSheet> {
             if (controller.notice.isNotEmpty && controller.notice != _staleNotice)
               Expanded(
                 child: Text(
-                  controller.notice,
+                  controller.notice.text,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: context.caption.copyWith(color: context.resolve(MacosColors.systemOrangeColor)),
+                  style: context.caption.copyWith(
+                    color: switch (controller.notice.level) {
+                      NoticeLevel.info => context.secondaryLabel,
+                      NoticeLevel.warning => context.resolve(MacosColors.systemOrangeColor),
+                      NoticeLevel.error => context.resolve(MacosColors.systemRedColor),
+                    },
+                  ),
                 ),
               )
             else

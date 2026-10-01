@@ -90,9 +90,17 @@ class CabinetBackend {
     return _runAsync(() => service.checkForUpdates(force: force));
   }
 
-  Future<GitUpdateApplyResult> applyGitUpdates(List<String> skillNames) {
+  Future<GitUpdatePreview> previewGitUpdate(String skillName) {
     final service = _git;
-    return _runAsync(() => service.applyUpdates(skillNames));
+    return _runAsync(() => service.previewUpdate(skillName));
+  }
+
+  Future<GitUpdateApplyResult> applyGitUpdates(
+    List<String> skillNames, {
+    Map<String, String> reviewedRevisions = const {},
+  }) {
+    final service = _git;
+    return _runAsync(() => service.applyUpdates(skillNames, reviewedRevisions: reviewedRevisions));
   }
 
   Future<LibraryDeleteResult> deleteSkill(String name) {

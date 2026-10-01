@@ -1,8 +1,10 @@
 import 'package:flutter/cupertino.dart';
 import 'package:macos_ui/macos_ui.dart';
+import 'package:path/path.dart' as p;
 
 import '../domain/git_import.dart';
 import 'modal.dart';
+import 'git_changes_sheet.dart';
 import 'scope.dart';
 import 'style.dart';
 import 'widgets.dart';
@@ -25,6 +27,7 @@ class _GitUpdatesSheet extends StatefulWidget {
 class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
   final Set<String> _selected = {};
   Map<String, String> _failures = const {};
+  final Map<String, String> _reviewedRevisions = {};
   bool _initialized = false;
   bool _checking = false;
   bool _applying = false;
@@ -33,8 +36,10 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_initialized) return;
+    final controller = CabinetScope.read(context);
+    if (controller.checkingGitUpdates) return;
     _initialized = true;
-    final sources = CabinetScope.read(context).gitSources;
+    final sources = controller.gitSources;
     final focused = widget.focusSkill;
     if (focused != null && sources[focused]?.state == GitTrackingState.updateAvailable) {
       _selected.add(focused);
@@ -74,7 +79,7 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
       _applying = true;
       _failures = const {};
     });
-    final result = await CabinetScope.read(context).applyGitUpdates(_selected);
+    final result = await CabinetScope.read(context).applyGitUpdates(_selected, reviewedRevisions: _reviewedRevisions);
     if (!mounted) return;
     if (result.failures.isEmpty) {
       Navigator.of(context).pop();
@@ -87,6 +92,14 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
         ..clear()
         ..addAll(result.failures.keys);
     });
+  }
+
+  void _review(GitSourceRecord source) {
+    showGitChangesSheet(
+      context,
+      source: source,
+      onReviewed: (revision) => _reviewedRevisions[source.skillName] = revision,
+    );
   }
 
   void _toggle(String name) {
@@ -105,7 +118,8 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
         return byState != 0 ? byState : a.skillName.compareTo(b.skillName);
       });
     final available = sources.where((source) => source.state == GitTrackingState.updateAvailable).toList();
-    final others = sources.where((source) => source.state != GitTrackingState.updateAvailable).toList();
+    final others = sources.where((source) => source.state == GitTrackingState.error).toList();
+    final checking = _checking || controller.checkingGitUpdates;
     final availableGroups = _groupByRepository(available);
     final otherGroups = _groupByRepository(others);
     final allSelected = available.isNotEmpty && available.every((source) => _selected.contains(source.skillName));
@@ -119,45 +133,47 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
           child: Row(
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Git skill updates',
-                      style: context.macos.typography.headline.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      available.isEmpty
-                          ? 'All ${sources.length} tracked skill${sources.length == 1 ? '' : 's'} are up to date.'
-                          : '${available.length} update${available.length == 1 ? '' : 's'} available. Updating replaces the tracked skill in place.',
-                      style: context.caption,
-                    ),
-                  ],
+                child: Text(
+                  'Skill updates',
+                  style: context.macos.typography.headline.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
-              const SizedBox(width: 16),
-              PushButton(
-                controlSize: ControlSize.small,
-                secondary: true,
-                onPressed: _checking || _applying ? null : _check,
-                child: _checking
-                    ? const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [ProgressCircle(radius: 7), SizedBox(width: 7), Text('Checking…')],
-                      )
-                    : const Text('Check now'),
+              // The body shows the check's progress; this only starts one.
+              IconAction(
+                icon: CupertinoIcons.arrow_clockwise,
+                tooltip: 'Check for updates',
+                onPressed: _applying || checking ? null : _check,
               ),
             ],
           ),
         ),
         Container(height: 1, color: context.separator),
         Flexible(
-          child: sources.isEmpty
+          child: checking
+              ? SizedBox(
+                  height: 180,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const ProgressCircle(),
+                        const SizedBox(height: 10),
+                        Text('Checking for updates…', style: context.caption),
+                      ],
+                    ),
+                  ),
+                )
+              : sources.isEmpty
               ? const EmptyState(
                   icon: CupertinoIcons.cloud,
                   title: 'No Git-tracked skills',
                   message: Text('Skills imported from a Git repository will appear here.'),
+                )
+              : available.isEmpty && others.isEmpty
+              ? const EmptyState(
+                  icon: CupertinoIcons.checkmark_circle,
+                  title: 'No updates available',
+                  message: SizedBox.shrink(),
                 )
               : ListView(
                   shrinkWrap: true,
@@ -165,32 +181,15 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
                   children: [
                     if (_failures.isNotEmpty) _FailureNote(_failures.length),
                     if (available.isNotEmpty) ...[
-                      SectionLabel(
-                        'UPDATES AVAILABLE · ${available.length}',
-                        trailing: available.length < 2
-                            ? null
-                            : PushButton(
-                                controlSize: ControlSize.small,
-                                secondary: true,
-                                onPressed: _applying || _checking
-                                    ? null
-                                    : () => setState(() {
-                                        if (allSelected) {
-                                          _selected.removeAll(available.map((source) => source.skillName));
-                                        } else {
-                                          _selected.addAll(available.map((source) => source.skillName));
-                                        }
-                                      }),
-                                child: Text(allSelected ? 'Deselect all' : 'Select all'),
-                              ),
-                      ),
+                      if (others.isNotEmpty) const SectionLabel('AVAILABLE'),
                       for (final group in availableGroups)
                         _RepositoryGroupCard(
                           sources: group,
                           selected: _selected,
                           failures: _failures,
-                          enabled: !_applying && !_checking,
+                          enabled: !_applying && !checking,
                           onToggle: _toggle,
+                          onReview: _review,
                           onToggleAll: () => setState(() {
                             final names = group.map((source) => source.skillName);
                             if (group.every((source) => _selected.contains(source.skillName))) {
@@ -202,7 +201,7 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
                         ),
                     ],
                     if (others.isNotEmpty) ...[
-                      SectionLabel('OTHER TRACKED SKILLS · ${others.length}'),
+                      const SectionLabel('COULD NOT CHECK'),
                       for (final group in otherGroups) _RepositoryGroupCard(sources: group),
                     ],
                   ],
@@ -210,33 +209,49 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
         ),
         AppDialogActions(
           children: [
-            Expanded(
-              child: Text(
-                _applying
-                    ? 'Updating ${_selected.length} skill${_selected.length == 1 ? '' : 's'}…'
-                    : '${_selected.length} selected',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.caption,
+            if (available.isNotEmpty && !checking)
+              Row(
+                children: [
+                  MacosCheckbox(
+                    semanticLabel: 'Select all updates',
+                    value: allSelected
+                        ? true
+                        : available.any((source) => _selected.contains(source.skillName))
+                        ? null
+                        : false,
+                    onChanged: checking || _applying
+                        ? null
+                        : (_) => setState(() {
+                            final names = available.map((source) => source.skillName);
+                            if (allSelected) {
+                              _selected.removeAll(names);
+                            } else {
+                              _selected.addAll(names);
+                            }
+                          }),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('Select all', style: context.caption),
+                ],
               ),
-            ),
+            const Spacer(),
             PushButton(
               controlSize: ControlSize.large,
               secondary: true,
               onPressed: _applying ? null : () => Navigator.of(context).pop(),
-              child: Text(available.isEmpty ? 'Done' : 'Cancel'),
+              child: Text(available.isEmpty || checking ? 'Done' : 'Cancel'),
             ),
-            if (available.isNotEmpty) ...[
+            if (available.isNotEmpty && !checking) ...[
               const SizedBox(width: 10),
               PushButton(
                 controlSize: ControlSize.large,
-                onPressed: _selected.isEmpty || _checking || _applying ? null : _apply,
+                onPressed: _selected.isEmpty || checking || _applying ? null : _apply,
                 child: _applying
                     ? const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [ProgressCircle(radius: 7), SizedBox(width: 7), Text('Updating…')],
                       )
-                    : const Text('Update selected'),
+                    : Text(_selected.isEmpty ? 'Update' : 'Update ${_selected.length}'),
               ),
             ],
           ],
@@ -269,6 +284,12 @@ List<List<GitSourceRecord>> _groupByRepository(Iterable<GitSourceRecord> sources
   return result;
 }
 
+String _repositoryLabel(String url) {
+  final path = url.startsWith('git@') ? url.split(':').last : Uri.tryParse(url)?.path ?? url;
+  final parts = path.split('/').where((part) => part.isNotEmpty).toList();
+  return (parts.length > 1 ? parts.sublist(parts.length - 2).join('/') : path).replaceFirst(RegExp(r'\.git$'), '');
+}
+
 class _RepositoryGroupCard extends StatelessWidget {
   const _RepositoryGroupCard({
     required this.sources,
@@ -277,6 +298,7 @@ class _RepositoryGroupCard extends StatelessWidget {
     this.enabled = false,
     this.onToggle,
     this.onToggleAll,
+    this.onReview,
   });
 
   final List<GitSourceRecord> sources;
@@ -285,12 +307,20 @@ class _RepositoryGroupCard extends StatelessWidget {
   final bool enabled;
   final void Function(String name)? onToggle;
   final VoidCallback? onToggleAll;
+  final void Function(GitSourceRecord source)? onReview;
 
   @override
   Widget build(BuildContext context) {
     final source = sources.first;
     final selectable = onToggle != null;
     final allSelected = sources.every((item) => selected.contains(item.skillName));
+    final someSelected = sources.any((item) => selected.contains(item.skillName));
+    // Folder headers only help when the repository's skills live in more
+    // than one folder; a single shared folder would just repeat itself.
+    final folders = groupByFolder(sources, (item) {
+      final folder = p.posix.dirname(item.repositoryPath);
+      return item.repositoryPath.isEmpty || folder == '.' ? '/' : '$folder/';
+    })..sortShallowestFirst();
     return Container(
       margin: const EdgeInsets.fromLTRB(8, 4, 8, 10),
       decoration: BoxDecoration(
@@ -306,45 +336,47 @@ class _RepositoryGroupCard extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
             child: Row(
               children: [
-                MacosIcon(CupertinoIcons.cloud, size: 14, color: context.secondaryLabel),
+                if (selectable)
+                  MacosCheckbox(
+                    semanticLabel: 'Select repository updates',
+                    value: allSelected
+                        ? true
+                        : someSelected
+                        ? null
+                        : false,
+                    onChanged: enabled ? (_) => onToggleAll?.call() : null,
+                  )
+                else
+                  MacosIcon(CupertinoIcons.cloud, size: 14, color: context.secondaryLabel),
                 const SizedBox(width: 8),
                 Expanded(
                   child: MacosTooltip(
-                    message: source.sourceUrl,
+                    message: '${source.sourceUrl}\n${source.ref}',
                     child: Text(
-                      source.sourceUrl,
+                      _repositoryLabel(source.sourceUrl),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: context.mono.copyWith(color: context.secondaryLabel),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Pill(source.ref),
-                const SizedBox(width: 8),
-                Text('${sources.length} skill${sources.length == 1 ? '' : 's'}', style: context.caption),
-                if (selectable && sources.length > 1) ...[
-                  const SizedBox(width: 10),
-                  PushButton(
-                    controlSize: ControlSize.small,
-                    secondary: true,
-                    onPressed: enabled ? onToggleAll : null,
-                    child: Text(allSelected ? 'Deselect repo' : 'Select repo'),
-                  ),
-                ],
               ],
             ),
           ),
           Container(height: 1, color: context.separator),
-          for (final item in sources)
-            _UpdateRow(
-              source: item,
-              selected: selected.contains(item.skillName),
-              failure: failures[item.skillName],
-              enabled: enabled,
-              showStatus: !selectable,
-              onPressed: selectable ? () => onToggle!(item.skillName) : null,
-            ),
+          for (final (folder, items) in folders) ...[
+            if (folders.length > 1) FolderHeader(folder, count: items.length),
+            for (final item in items)
+              _UpdateRow(
+                source: item,
+                selected: selected.contains(item.skillName),
+                failure: failures[item.skillName],
+                enabled: enabled,
+                showStatus: !selectable,
+                onToggle: selectable ? () => onToggle!(item.skillName) : null,
+                onReview: selectable && enabled ? () => onReview?.call(item) : null,
+              ),
+          ],
         ],
       ),
     );
@@ -358,7 +390,8 @@ class _UpdateRow extends StatelessWidget {
     this.failure,
     this.enabled = false,
     this.showStatus = true,
-    this.onPressed,
+    this.onToggle,
+    this.onReview,
   });
 
   final GitSourceRecord source;
@@ -366,14 +399,16 @@ class _UpdateRow extends StatelessWidget {
   final String? failure;
   final bool enabled;
   final bool showStatus;
-  final VoidCallback? onPressed;
+  final VoidCallback? onToggle;
+  final VoidCallback? onReview;
 
   @override
   Widget build(BuildContext context) {
-    final selectable = onPressed != null;
+    final selectable = onToggle != null;
     final location = source.repositoryPath.isEmpty || source.repositoryPath == '.'
         ? 'repository root'
         : source.repositoryPath;
+    final checkError = failure == null && source.state == GitTrackingState.error ? source.lastCheckError : null;
     final detail =
         failure ?? '${source.sourceUrl}\nref: ${source.ref}\npath: $location\ncurrent: ${_short(source.revision)}';
     final color = switch (source.state) {
@@ -382,14 +417,14 @@ class _UpdateRow extends StatelessWidget {
       _ => context.secondaryLabel,
     };
     return HoverRow(
-      semanticLabel: source.skillName,
-      onPressed: selectable && enabled ? onPressed : null,
+      semanticLabel: selectable ? 'Review changes to ${source.skillName}' : source.skillName,
+      onPressed: onReview,
       builder: (context, _) => Opacity(
         opacity: selectable || source.state == GitTrackingState.error ? 1 : 0.7,
         child: Row(
           children: [
             if (selectable) ...[
-              MacosCheckbox(value: selected, onChanged: enabled ? (_) => onPressed?.call() : null),
+              MacosCheckbox(value: selected, onChanged: enabled ? (_) => onToggle?.call() : null),
               const SizedBox(width: 12),
             ] else ...[
               SizedBox(width: 16, child: MacosIcon(CupertinoIcons.cloud, size: 14, color: color)),
@@ -400,19 +435,21 @@ class _UpdateRow extends StatelessWidget {
                 message: detail,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(source.skillName, style: context.body.copyWith(fontWeight: FontWeight.w500)),
-                    if (source.repositoryPath.isNotEmpty &&
-                        source.repositoryPath != '.' &&
-                        source.repositoryPath != source.skillName) ...[
-                      const SizedBox(height: 2),
+                    Text(
+                      source.skillName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.body.copyWith(fontWeight: FontWeight.w500),
+                    ),
+                    if (checkError != null)
                       Text(
-                        source.repositoryPath,
-                        maxLines: 1,
+                        checkError,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: context.mono.copyWith(color: context.secondaryLabel),
+                        style: context.caption,
                       ),
-                    ],
                   ],
                 ),
               ),
@@ -424,7 +461,9 @@ class _UpdateRow extends StatelessWidget {
                 child: Pill('Update failed', color: context.resolve(CupertinoColors.systemRed)),
               )
             else if (showStatus)
-              Pill(source.statusLabel, color: color),
+              Pill(source.statusLabel, color: color)
+            else
+              MacosIcon(CupertinoIcons.chevron_right, size: 12, color: context.tertiaryLabel),
           ],
         ),
       ),

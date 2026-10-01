@@ -27,6 +27,7 @@ import '../domain/deployment.dart';
 import '../domain/health.dart';
 import 'cabinet_paths.dart';
 import 'fs_util.dart';
+import '../domain/notice.dart';
 
 class _Assignment {
   _Assignment({List<String>? sets, List<String>? skills}) : sets = sets ?? [], skills = skills ?? [];
@@ -85,15 +86,15 @@ class DeploymentService {
 
   DeploymentSnapshot sync() {
     try {
-      return _snapshot(_read(), '');
+      return _snapshot(_read(), Notice.none);
     } catch (e) {
-      return DeploymentSnapshot(agents: const [], catalog: const [], foreign: const [], notice: 'Error: $e');
+      return DeploymentSnapshot(agents: const [], catalog: const [], foreign: const [], notice: Notice.error('Error: $e'));
     }
   }
 
   DeploymentSnapshot setAgentSet(String agent, String set, {required bool enabled}) {
     final state = _read();
-    if (!state.providers.contains(agent)) return _snapshot(state, 'Unknown agent');
+    if (!state.providers.contains(agent)) return _snapshot(state, Notice.warning('Unknown agent'));
     final assignment = state.assignmentOf(agent);
     assignment.sets = [...assignment.sets.where((name) => name != set), if (enabled) set];
     state.assignments[agent] = assignment;
@@ -115,7 +116,7 @@ class DeploymentService {
 
   DeploymentSnapshot setAgentSkill(String agent, String skill, {required bool enabled}) {
     final state = _read();
-    if (!state.providers.contains(agent)) return _snapshot(state, 'Unknown agent');
+    if (!state.providers.contains(agent)) return _snapshot(state, Notice.warning('Unknown agent'));
     final assignment = state.assignmentOf(agent);
     assignment.skills = [...assignment.skills.where((name) => name != skill), if (enabled) skill];
     state.assignments[agent] = assignment;
@@ -124,7 +125,7 @@ class DeploymentService {
 
   DeploymentSnapshot setAgentEnabled(String key, {required bool enabled}) {
     final state = _read();
-    if (!state.providers.contains(key)) return _snapshot(state, 'Unknown agent');
+    if (!state.providers.contains(key)) return _snapshot(state, Notice.warning('Unknown agent'));
     state.disabledProviders = [...state.disabledProviders.where((k) => k != key), if (!enabled) key];
     return _commit(state);
   }
@@ -146,10 +147,10 @@ class DeploymentService {
   DeploymentSnapshot addAgent(String key) {
     final state = _read();
     final agent = state.definition(key);
-    if (agent == null) return _snapshot(state, 'Unknown agent');
-    if (state.providers.contains(agent.key)) return _snapshot(state, '');
+    if (agent == null) return _snapshot(state, Notice.warning('Unknown agent'));
+    if (state.providers.contains(agent.key)) return _snapshot(state, Notice.none);
     final clash = _folderClash(state, agent.label, agent.dir);
-    if (clash.isNotEmpty) return _snapshot(state, clash);
+    if (clash.isNotEmpty) return _snapshot(state, Notice.warning(clash));
     state.providers.add(agent.key);
     state.assignments.putIfAbsent(agent.key, _Assignment.new);
     return _commit(state);
@@ -161,11 +162,11 @@ class DeploymentService {
     final state = _read();
     final label = rawLabel.trim();
     final dir = rawDir.trim();
-    if (label.isEmpty) return _snapshot(state, 'Give the agent a name.');
+    if (label.isEmpty) return _snapshot(state, Notice.warning('Give the agent a name.'));
     final bad = _badFolder(dir);
-    if (bad.isNotEmpty) return _snapshot(state, bad);
+    if (bad.isNotEmpty) return _snapshot(state, Notice.warning(bad));
     final clash = _folderClash(state, label, dir);
-    if (clash.isNotEmpty) return _snapshot(state, clash);
+    if (clash.isNotEmpty) return _snapshot(state, Notice.warning(clash));
     final key = _freeKey(state, label);
     final stored = paths.portable(dir);
     state.custom[key] = AgentDefinition(key: key, label: label, dir: stored, detect: stored);
@@ -180,25 +181,25 @@ class DeploymentService {
   DeploymentSnapshot setAgentPath(String key, String rawDir) {
     final state = _read();
     final agent = state.definition(key);
-    if (agent == null || !state.providers.contains(key)) return _snapshot(state, 'Unknown agent');
+    if (agent == null || !state.providers.contains(key)) return _snapshot(state, Notice.warning('Unknown agent'));
     final own = state.custom[key];
     final dir = rawDir.trim();
-    if (dir.isEmpty && own != null) return _snapshot(state, 'Give ${agent.label} a folder.');
+    if (dir.isEmpty && own != null) return _snapshot(state, Notice.warning('Give ${agent.label} a folder.'));
     final catalogDir = catalogEntry(key)?.dir;
     final reset =
         own == null && (dir.isEmpty || (catalogDir != null && paths.resolveUser(dir) == paths.resolveUser(catalogDir)));
     if (!reset) {
       final bad = _badFolder(dir);
-      if (bad.isNotEmpty) return _snapshot(state, bad);
+      if (bad.isNotEmpty) return _snapshot(state, Notice.warning(bad));
     }
     final target = reset ? catalogDir! : paths.portable(dir);
-    if (target == agent.dir) return _snapshot(state, '');
+    if (target == agent.dir) return _snapshot(state, Notice.none);
     final clash = _folderClash(state, agent.label, target, except: key);
-    if (clash.isNotEmpty) return _snapshot(state, clash);
+    if (clash.isNotEmpty) return _snapshot(state, Notice.warning(clash));
     try {
       _unlinkAll(agent);
     } catch (e) {
-      return _snapshot(_read(), 'Error: $e');
+      return _snapshot(_read(), Notice.error('Error: $e'));
     }
     if (own != null) {
       state.custom[key] = AgentDefinition(key: key, label: own.label, dir: target, detect: target);
@@ -216,13 +217,13 @@ class DeploymentService {
   DeploymentSnapshot removeAgent(String key) {
     final state = _read();
     final agent = state.definition(key);
-    if (agent == null || !state.providers.contains(key)) return _snapshot(state, 'Unknown agent');
+    if (agent == null || !state.providers.contains(key)) return _snapshot(state, Notice.warning('Unknown agent'));
     state.providers.remove(key);
     state.disabledProviders.remove(key);
     try {
       _unlinkAll(agent);
     } catch (e) {
-      return _snapshot(_read(), 'Error: $e');
+      return _snapshot(_read(), Notice.error('Error: $e'));
     }
     if (state.custom.remove(key) != null) state.assignments.remove(key);
     state.overrides.remove(key);
@@ -332,9 +333,9 @@ class DeploymentService {
   DeploymentSnapshot _commit(_State state) {
     try {
       writeJsonAtomic(paths.deploymentFile, state.toJson());
-      return _snapshot(state, '');
+      return _snapshot(state, Notice.none);
     } catch (e) {
-      return _snapshot(_read(), 'Error: $e');
+      return _snapshot(_read(), Notice.error('Error: $e'));
     }
   }
 
@@ -463,7 +464,7 @@ class DeploymentService {
 
   // ---- snapshot -------------------------------------------------------------
 
-  DeploymentSnapshot _snapshot(_State state, String notice) {
+  DeploymentSnapshot _snapshot(_State state, Notice notice) {
     final issues = _reconcile(state);
 
     final agents = <Agent>[];
