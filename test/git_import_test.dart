@@ -8,6 +8,27 @@ import 'package:skill_cabinet/src/services/git_import_service.dart';
 import 'package:skill_cabinet/src/services/fs_util.dart';
 
 void main() {
+  test('repository browser links normalize Git remotes', () {
+    const urls = {
+      'https://github.com/acme/skills.git': 'https://github.com/acme/skills',
+      'https://git.example.com:8443/acme/skills': 'https://git.example.com:8443/acme/skills',
+      'https://user@git.example.com/acme/skills.git/': 'https://git.example.com/acme/skills',
+      'ssh://git@git.example.com:2222/acme/skills.git': 'https://git.example.com/acme/skills',
+      'git@git.example.com:acme/skills.git': 'https://git.example.com/acme/skills',
+      '/tmp/skills': null,
+    };
+    for (final entry in urls.entries) {
+      final source = GitSourceRecord(
+        skillName: 'reviewer',
+        sourceUrl: entry.key,
+        ref: 'main',
+        repositoryPath: 'reviewer',
+        revision: 'abc123',
+      );
+      expect(source.repositoryWebUrl, entry.value, reason: entry.key);
+    }
+  });
+
   test('accepts HTTPS, SSH, and SCP-style Git URLs', () {
     const service = GitImportService(CabinetPaths('/tmp/cabinet'));
     expect(service.validateRemoteUrl('https://github.com/acme/skills.git'), contains('github.com'));

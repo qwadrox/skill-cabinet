@@ -34,6 +34,7 @@ class _PreviewPaneState extends State<PreviewPane> {
     final name = controller.previewName;
     final preview = controller.preview;
     if (name == null) return const SizedBox.shrink();
+    final repositoryUrl = controller.gitSources[name]?.repositoryWebUrl;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -68,6 +69,13 @@ class _PreviewPaneState extends State<PreviewPane> {
                 tooltip: 'Show in Finder',
                 onPressed: () => controller.revealSkill(name),
               ),
+              if (repositoryUrl != null)
+                IconAction(
+                  icon: CupertinoIcons.arrow_up_right_square,
+                  size: 16,
+                  tooltip: 'Open repository · $repositoryUrl',
+                  onPressed: () => controller.openUrl(repositoryUrl),
+                ),
               IconAction(icon: CupertinoIcons.xmark, tooltip: 'Close preview', onPressed: controller.closePreview),
             ],
           ),

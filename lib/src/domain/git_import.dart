@@ -79,6 +79,21 @@ class GitSourceRecord {
   // Null for older repository-only checks; those must be checked against files.
   final bool? hasContentChanges;
 
+  // Browser address for HTTPS, SSH, and SCP-style Git remotes.
+  String? get repositoryWebUrl {
+    final scp = RegExp(r'^git@([^:/\s]+):([^\s]+)$').firstMatch(sourceUrl);
+    final uri = scp == null
+        ? Uri.tryParse(sourceUrl)
+        : Uri(scheme: 'ssh', host: scp.group(1), path: '/${scp.group(2)}');
+    if (uri == null || !const {'https', 'ssh'}.contains(uri.scheme) || uri.host.isEmpty) return null;
+    return Uri(
+      scheme: 'https',
+      host: uri.host,
+      port: uri.scheme == 'https' && uri.hasPort ? uri.port : null,
+      path: uri.path.replaceFirst(RegExp(r'\.git/?$'), ''),
+    ).toString();
+  }
+
   GitTrackingState get state {
     if (lastCheckError != null) return GitTrackingState.error;
     if (hasContentChanges == null) return GitTrackingState.tracked;
