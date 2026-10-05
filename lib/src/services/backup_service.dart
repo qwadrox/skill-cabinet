@@ -204,6 +204,7 @@ class BackupService {
           'collections.json' => 'skill sets',
           'deployment.json' => 'agents',
           'git_sources.json' => 'Git sources',
+          'git_repositories.json' => 'Git discoveries',
           final other => other,
         });
       }

@@ -164,16 +164,21 @@ class GitImportChoice {
   final List<String> repositoryPaths;
 }
 
-Future<GitImportChoice?> showGitImportSheet(BuildContext context, GitImportPreview preview) =>
+Future<GitImportChoice?> showGitImportSheet(BuildContext context, GitImportPreview preview, {Set<String>? onlyPaths}) =>
     showAppModal<GitImportChoice>(
       context: context,
-      builder: (_) => AppDialogCard(width: 720, maxHeight: 680, child: _GitImportSheet(preview: preview)),
+      builder: (_) => AppDialogCard(
+        width: 720,
+        maxHeight: 680,
+        child: _GitImportSheet(preview: preview, onlyPaths: onlyPaths),
+      ),
     );
 
 class _GitImportSheet extends StatefulWidget {
-  const _GitImportSheet({required this.preview});
+  const _GitImportSheet({required this.preview, this.onlyPaths});
 
   final GitImportPreview preview;
+  final Set<String>? onlyPaths;
 
   @override
   State<_GitImportSheet> createState() => _GitImportSheetState();
@@ -186,7 +191,9 @@ class _GitImportSheet extends StatefulWidget {
 class _GitImportSheetState extends State<_GitImportSheet> {
   late final Set<String> _selected = {for (final candidate in _new) candidate.repositoryPath};
 
-  Iterable<GitSkillCandidate> get _candidates => widget.preview.candidates;
+  Iterable<GitSkillCandidate> get _candidates => widget.preview.candidates.where(
+    (candidate) => widget.onlyPaths == null || widget.onlyPaths!.contains(candidate.repositoryPath),
+  );
   Iterable<GitSkillCandidate> get _new =>
       _candidates.where((candidate) => candidate.selectable && !candidate.replaces && !candidate.alternative);
   int get _replacing =>

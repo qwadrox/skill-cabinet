@@ -198,12 +198,78 @@ class GitFileChange {
 }
 
 class GitUpdateCheckResult {
-  const GitUpdateCheckResult({required this.records, required this.checked, required this.updates, this.failures = 0});
+  const GitUpdateCheckResult({
+    required this.records,
+    required this.checked,
+    required this.updates,
+    this.failures = 0,
+    this.repositories = const [],
+  });
 
   final Map<String, GitSourceRecord> records;
   final int checked;
   final int updates;
   final int failures;
+  final List<GitRepositoryDiscovery> repositories;
+}
+
+// Repository paths identify skills independently of their display names.
+// Seen paths include skills skipped at import and dismissed discoveries.
+class GitRepositoryDiscovery {
+  const GitRepositoryDiscovery({
+    required this.sourceUrl,
+    required this.ref,
+    required this.seenPaths,
+    this.pending = const [],
+  });
+
+  final String sourceUrl;
+  final String ref;
+  final Set<String> seenPaths;
+  final List<GitDiscoveredSkill> pending;
+
+  String get key => '$sourceUrl\u0000$ref';
+
+  Map<String, Object> toJson() => {
+    'sourceUrl': sourceUrl,
+    'ref': ref,
+    'seenPaths': seenPaths.toList()..sort(),
+    'pending': [for (final skill in pending) skill.toJson()],
+  };
+
+  static GitRepositoryDiscovery? fromJson(Object? value) {
+    if (value is! Map || value['sourceUrl'] is! String || value['ref'] is! String || value['seenPaths'] is! List) {
+      return null;
+    }
+    return GitRepositoryDiscovery(
+      sourceUrl: value['sourceUrl'] as String,
+      ref: value['ref'] as String,
+      seenPaths: (value['seenPaths'] as List).whereType<String>().toSet(),
+      pending: [
+        if (value['pending'] is List)
+          for (final entry in value['pending'] as List) ?GitDiscoveredSkill.fromJson(entry),
+      ],
+    );
+  }
+}
+
+class GitDiscoveredSkill {
+  const GitDiscoveredSkill({required this.name, required this.repositoryPath, required this.description});
+
+  final String name;
+  final String repositoryPath;
+  final String description;
+
+  Map<String, Object> toJson() => {'name': name, 'repositoryPath': repositoryPath, 'description': description};
+
+  static GitDiscoveredSkill? fromJson(Object? value) {
+    if (value is! Map || value['name'] is! String || value['repositoryPath'] is! String) return null;
+    return GitDiscoveredSkill(
+      name: value['name'] as String,
+      repositoryPath: value['repositoryPath'] as String,
+      description: value['description'] is String ? value['description'] as String : '',
+    );
+  }
 }
 
 class GitUpdateApplyResult {

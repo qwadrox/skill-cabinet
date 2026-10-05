@@ -39,7 +39,9 @@ class SkillPane extends StatelessWidget {
               : _NoticeBanner(
                   controller.notice,
                   onDismiss: controller.dismissNotice,
-                  onReviewUpdates: updates == 0 ? null : () => showGitUpdatesSheet(context),
+                  onReviewUpdates: updates == 0 && controller.newGitSkills == 0
+                      ? null
+                      : () => showGitUpdatesSheet(context),
                 ),
         ),
         Expanded(
@@ -211,7 +213,11 @@ class _NoticeBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = notice.text;
-    final updateAvailable = text.endsWith('Git update available') || text.endsWith('Git updates available');
+    final updateAvailable =
+        text.endsWith('Git update available') ||
+        text.endsWith('Git updates available') ||
+        text.endsWith('new skill available') ||
+        text.endsWith('new skills available');
     final (tintColor, icon) = switch (notice.level) {
       NoticeLevel.info => (MacosColors.systemBlueColor, CupertinoIcons.info_circle),
       NoticeLevel.warning => (MacosColors.systemOrangeColor, CupertinoIcons.exclamationmark_triangle),

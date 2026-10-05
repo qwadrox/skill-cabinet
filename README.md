@@ -22,6 +22,7 @@ AI agent skills are often scattered across several hidden folders. Skill Cabinet
 - Turn collections or individual skills on and off for each agent.
 - Keep agent skill folders synchronized with links managed by the cabinet.
 - Track Git-imported skills, review file changes against your local copy, and update selected skills in place.
+- Discover new skills in tracked repositories, then import or dismiss them from the update manager.
 - See problems, such as missing or conflicting skills, without silently changing files you do not own.
 - Back up the whole cabinet automatically to a Git history, optionally pushed to a repository you own, and restore it on a new Mac.
 
@@ -94,6 +95,7 @@ Skill Cabinet stores its data locally:
 ~/.skill-cabinet/collections.json collections and membership
 ~/.skill-cabinet/deployment.json  agents and assignments
 ~/.skill-cabinet/git_sources.json tracked Git repository sources
+~/.skill-cabinet/git_repositories.json seen skills and pending discoveries per repository/branch
 ~/.skill-cabinet/.git/            backup history
 ```
 
@@ -102,6 +104,8 @@ The app uploads nothing unless you connect a backup repository; then it pushes t
 ## Status
 
 Skill Cabinet is an early macOS release. Git repository import supports shallow HTTPS/SSH checkouts, with provider-neutral remote revision checks, cloud status indicators, and an update manager. Applying an available update remains an explicit user action.
+
+The update manager also lists newly discovered skills in tracked repositories. The first import remembers all skills found, including ones you skip. New discoveries remain available across checks and restarts until you import or dismiss them; importing does not enable them for any agent. Repositories imported before discovery was supported establish their initial list on the next check without flagging existing skills as new.
 
 ## License
 

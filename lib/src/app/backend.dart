@@ -85,6 +85,21 @@ class CabinetBackend {
     return _run(service.sources);
   }
 
+  Future<List<GitRepositoryDiscovery>> gitRepositories() {
+    final service = _git;
+    return _run(service.repositories);
+  }
+
+  Future<GitImportPreview> previewGitRepository(String sourceUrl, String ref) {
+    final service = _git;
+    return _runAsync(() => service.previewRepository(sourceUrl, ref));
+  }
+
+  Future<void> dismissGitDiscovery(String sourceUrl, String ref, String repositoryPath) {
+    final service = _git;
+    return _run(() => service.dismissDiscovery(sourceUrl, ref, repositoryPath));
+  }
+
   Future<GitUpdateCheckResult> checkGitUpdates({bool force = false}) {
     final service = _git;
     return _runAsync(() => service.checkForUpdates(force: force));

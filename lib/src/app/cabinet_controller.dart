@@ -43,6 +43,9 @@ class CabinetController extends ChangeNotifier {
 
   LibrarySnapshot library = LibrarySnapshot.empty;
   Map<String, GitSourceRecord> gitSources = const {};
+  List<GitRepositoryDiscovery> gitRepositories = const [];
+
+  int get newGitSkills => gitRepositories.fold(0, (count, repository) => count + repository.pending.length);
   CollectionsSnapshot collections = CollectionsSnapshot.empty;
   DeploymentSnapshot deployment = DeploymentSnapshot.empty;
   bool loaded = false;
@@ -90,6 +93,7 @@ class CabinetController extends ChangeNotifier {
       await Future.wait([
         _backend.scan().then(_libraryLoaded),
         _backend.gitSources().then(_gitSourcesLoaded),
+        _backend.gitRepositories().then(_gitRepositoriesLoaded),
         _backend.listSets().then(_collectionsLoaded),
         _backend.sync().then(_deploymentLoaded),
         _backend.backupStatus().then(_backupLoaded),
@@ -133,6 +137,12 @@ class CabinetController extends ChangeNotifier {
 
   void _gitSourcesLoaded(Map<String, GitSourceRecord> sources) {
     gitSources = sources;
+    _backupSoon();
+    notifyListeners();
+  }
+
+  void _gitRepositoriesLoaded(List<GitRepositoryDiscovery> repositories) {
+    gitRepositories = repositories;
     _backupSoon();
     notifyListeners();
   }
@@ -290,6 +300,7 @@ class CabinetController extends ChangeNotifier {
       final result = await _backend.importGit(preview, paths.toList());
       _libraryLoaded(result.library.snapshot);
       _gitSourcesLoaded(await _backend.gitSources());
+      _gitRepositoriesLoaded(await _backend.gitRepositories());
       // A replaced skill may be the one open in the preview.
       final previewed = previewName;
       if (previewed != null && result.library.imported.contains(previewed)) {
@@ -317,15 +328,9 @@ class CabinetController extends ChangeNotifier {
     try {
       final result = await _backend.checkGitUpdates(force: force);
       gitSources = result.records;
-      if (!quiet || result.updates > 0 || result.failures > 0) {
-        notice = switch ((result.updates, result.failures)) {
-          // Failed checks are listed in the review sheet alongside available updates.
-          (final updates, _) when updates > 0 => Notice.info('$updates Git update${updates == 1 ? '' : 's'} available'),
-          (0, final failures) when failures > 0 => Notice.warning(
-            'Could not check $failures Git ${failures == 1 ? 'repository' : 'repositories'}',
-          ),
-          _ => const Notice.info('All Git-tracked skills are up to date'),
-        };
+      _gitRepositoriesLoaded(result.repositories);
+      if (!quiet || result.updates > 0 || newGitSkills > 0 || result.failures > 0) {
+        notice = _gitCheckNotice(result.updates, result.failures);
       }
     } catch (e) {
       if (!quiet) notice = Notice.error('Error checking Git updates: $e');
@@ -336,6 +341,44 @@ class CabinetController extends ChangeNotifier {
   }
 
   Future<GitUpdatePreview> previewGitUpdate(String skillName) => _backend.previewGitUpdate(skillName);
+
+  Notice _gitCheckNotice(int updates, int failures) {
+    final available = [
+      if (updates > 0) '$updates Git update${updates == 1 ? '' : 's'} available',
+      if (newGitSkills > 0) '$newGitSkills new skill${newGitSkills == 1 ? '' : 's'} available',
+    ];
+    if (available.isNotEmpty) return Notice.info(available.join(' · '));
+    if (failures > 0) {
+      return Notice.warning('Could not check $failures Git ${failures == 1 ? 'repository' : 'repositories'}');
+    }
+    return const Notice.info('All Git-tracked skills are up to date');
+  }
+
+  Future<GitPreviewOutcome> previewGitRepository(GitRepositoryDiscovery repository) async {
+    try {
+      return GitPreviewOutcome.found(await _backend.previewGitRepository(repository.sourceUrl, repository.ref));
+    } catch (error) {
+      return GitPreviewOutcome.failed('$error');
+    }
+  }
+
+  Future<void> dismissGitDiscovery(GitRepositoryDiscovery repository, GitDiscoveredSkill skill) async {
+    try {
+      await _backend.dismissGitDiscovery(repository.sourceUrl, repository.ref, skill.repositoryPath);
+      _gitRepositoriesLoaded(await _backend.gitRepositories());
+      notice = _gitCheckNotice(
+        gitSources.values.where((source) => source.state == GitTrackingState.updateAvailable).length,
+        gitSources.values
+            .where((source) => source.state == GitTrackingState.error)
+            .map((source) => '${source.sourceUrl}\u0000${source.ref}')
+            .toSet()
+            .length,
+      );
+    } catch (error) {
+      _failed(error);
+    }
+    notifyListeners();
+  }
 
   Future<GitUpdateApplyResult> applyGitUpdates(
     Iterable<String> skillNames, {
@@ -349,6 +392,7 @@ class CabinetController extends ChangeNotifier {
     try {
       final result = await _backend.applyGitUpdates(names, reviewedRevisions: reviewedRevisions);
       gitSources = result.records;
+      _gitRepositoriesLoaded(await _backend.gitRepositories());
       _libraryLoaded(await _backend.scan());
       final previewed = previewName;
       if (previewed != null && result.updated.contains(previewed)) {
@@ -397,6 +441,7 @@ class CabinetController extends ChangeNotifier {
         await _backend.removeGitSource(deleted);
         final sources = {...gitSources}..remove(deleted);
         gitSources = sources;
+        _gitRepositoriesLoaded(await _backend.gitRepositories());
         notifyListeners();
       } catch (e) {
         _noticed(Notice.warning('Skill deleted, but Git tracking could not be cleared: $e'));

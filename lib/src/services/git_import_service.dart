@@ -55,44 +55,67 @@ class GitImportService {
 
       final revision = _gitValue(checkout, ['rev-parse', 'HEAD']);
       final branch = _gitValue(checkout, ['branch', '--show-current']);
-      final repository = _repositoryName(sourceUrl);
-      final found = findSkillDirs(checkout, limit: maxCandidates);
-      final sources = _readSources();
-      final candidates = <GitSkillCandidate>[];
-      for (final path in found) {
-        final relative = p.equals(path, checkout) ? '' : p.relative(path, from: checkout).replaceAll('\\', '/');
-        final name = relative.isEmpty ? repository : p.basename(path);
-        final source = sources[name];
-        final duplicate = lexists(p.join(paths.storeDir, name));
-        candidates.add(
-          GitSkillCandidate(
-            name: name,
-            repositoryPath: relative,
-            localPath: path,
-            description: _descriptionAt(path),
-            duplicate: duplicate,
-            tracked: duplicate && source != null && source.sourceUrl == sourceUrl && source.repositoryPath == relative,
-            blockedReason: _blockedReason(path),
-          ),
-        );
-      }
-      candidates.sort((a, b) => a.repositoryPath.compareTo(b.repositoryPath));
-
-      final normalized = markClashes(candidates);
-
-      return GitImportPreview(
-        sourceUrl: sourceUrl,
-        repository: repository,
-        ref: branch.isEmpty ? 'HEAD' : branch,
-        revision: revision,
-        checkoutPath: checkout,
-        candidates: normalized,
-      );
+      return _previewCheckout(sourceUrl, branch.isEmpty ? 'HEAD' : branch, revision, checkout);
     } catch (_) {
       if (session.existsSync()) session.deleteSync(recursive: true);
       rethrow;
     }
   }
+
+  // Discovery imports must use the same ref as the skills already tracked.
+  Future<GitImportPreview> previewRepository(String sourceUrl, String ref) async {
+    final source = _readSources().values.where((s) => s.sourceUrl == sourceUrl && s.ref == ref).firstOrNull;
+    if (source == null) throw const GitImportException('This repository is no longer tracked');
+    final session = Directory.systemTemp.createTempSync(_tempPrefix);
+    final checkout = p.join(session.path, 'repository');
+    try {
+      await _cloneSource(source, checkout);
+      return _previewCheckout(sourceUrl, ref, _gitValue(checkout, ['rev-parse', 'HEAD']), checkout);
+    } catch (_) {
+      if (session.existsSync()) session.deleteSync(recursive: true);
+      rethrow;
+    }
+  }
+
+  GitImportPreview _previewCheckout(String sourceUrl, String ref, String revision, String checkout) {
+    final repository = _repositoryName(sourceUrl);
+    final sources = _readSources();
+    final candidates = <GitSkillCandidate>[];
+    for (final path in findSkillDirs(checkout, limit: maxCandidates)) {
+      final relative = _repositoryPath(checkout, path);
+      final name = relative.isEmpty ? repository : p.basename(path);
+      final source = sources[name];
+      final duplicate = lexists(p.join(paths.storeDir, name));
+      candidates.add(
+        GitSkillCandidate(
+          name: name,
+          repositoryPath: relative,
+          localPath: path,
+          description: _descriptionAt(path),
+          duplicate: duplicate,
+          tracked:
+              duplicate &&
+              source != null &&
+              source.sourceUrl == sourceUrl &&
+              source.ref == ref &&
+              source.repositoryPath == relative,
+          blockedReason: _blockedReason(path),
+        ),
+      );
+    }
+    candidates.sort((a, b) => a.repositoryPath.compareTo(b.repositoryPath));
+    return GitImportPreview(
+      sourceUrl: sourceUrl,
+      repository: repository,
+      ref: ref,
+      revision: revision,
+      checkoutPath: checkout,
+      candidates: markClashes(candidates),
+    );
+  }
+
+  String _repositoryPath(String checkout, String path) =>
+      p.equals(path, checkout) ? '' : p.relative(path, from: checkout).replaceAll('\\', '/');
 
   // Folders sharing a name would land on the same store folder. The
   // shallowest is offered by default: a repository's main copy usually
@@ -197,6 +220,19 @@ class GitImportService {
         };
         try {
           _writeSources(records);
+          final repositories = _readRepositories();
+          final skills = [
+            for (final candidate in preview.candidates)
+              GitDiscoveredSkill(
+                name: candidate.name,
+                repositoryPath: candidate.repositoryPath,
+                description: candidate.description,
+              ),
+          ];
+          // A check may have found more skills while the import picker was
+          // open. Its discoveries must survive an older import snapshot.
+          _observeRepository(repositories, preview.sourceUrl, preview.ref, skills, records, preserveMissing: true);
+          _writeRepositories(repositories);
           saved = result.imported.length;
         } catch (error) {
           final notice = Notice.warning(
@@ -259,7 +295,10 @@ class GitImportService {
 
   void removeSource(String skillName) {
     final records = _readSources();
-    if (records.remove(skillName) != null) _writeSources(records);
+    if (records.remove(skillName) != null) {
+      _writeSources(records);
+      _writeRepositories(_readRepositories());
+    }
   }
 
   Map<String, GitSourceRecord> sources() => _readSources();
@@ -271,11 +310,13 @@ class GitImportService {
     final records = _readSources();
     if (records.isEmpty) return const GitUpdateCheckResult(records: {}, checked: 0, updates: 0);
 
+    final repositories = _readRepositories();
     final now = DateTime.now().toUtc();
     final groups = <String, List<String>>{};
     for (final entry in records.entries) {
       final source = entry.value;
       if (!force &&
+          repositories.containsKey('${source.sourceUrl}\u0000${source.ref}') &&
           source.hasContentChanges != null &&
           source.lastCheckedAt != null &&
           now.difference(source.lastCheckedAt!.toUtc()) < const Duration(hours: 24)) {
@@ -287,6 +328,7 @@ class GitImportService {
       return GitUpdateCheckResult(
         records: records,
         checked: 0,
+        repositories: repositories.values.toList(),
         updates: records.values.where((record) => record.state == GitTrackingState.updateAvailable).length,
       );
     }
@@ -301,6 +343,7 @@ class GitImportService {
       try {
         await _cloneSource(source, checkout);
         final revision = _gitValue(checkout, ['rev-parse', 'HEAD']);
+        _observeCheckout(repositories, source, checkout, records);
         for (final name in names) {
           final record = records[name]!;
           try {
@@ -326,9 +369,11 @@ class GitImportService {
       if (failed) failures++;
     }
     _writeSources(updated);
+    _writeRepositories(repositories);
     return GitUpdateCheckResult(
       records: updated,
       checked: groups.length,
+      repositories: repositories.values.toList(),
       updates: updated.values.where((record) => record.state == GitTrackingState.updateAvailable).length,
       failures: failures,
     );
@@ -490,6 +535,7 @@ class GitImportService {
       groups.putIfAbsent('${source.sourceUrl}\u0000${source.ref}', () => []).add(name);
     }
 
+    final repositories = _readRepositories();
     final updated = <String>[];
     final failures = <String, String>{};
     final nextRecords = <String, GitSourceRecord>{...records};
@@ -500,6 +546,7 @@ class GitImportService {
       try {
         await _cloneSource(source, checkout);
         final revision = _gitValue(checkout, ['rev-parse', 'HEAD']);
+        _observeCheckout(repositories, source, checkout, records);
         final staging = Directory(p.join(session.path, 'selected'))..createSync();
 
         for (final name in names) {
@@ -529,6 +576,7 @@ class GitImportService {
     }
 
     if (updated.isNotEmpty) _writeSources(nextRecords);
+    _writeRepositories(repositories);
     return GitUpdateApplyResult(records: nextRecords, updated: updated, failures: failures);
   }
 
@@ -704,6 +752,91 @@ class GitImportService {
       if (record != null) records[entry.key.toString()] = record;
     }
     return records;
+  }
+
+  List<GitRepositoryDiscovery> repositories() => _readRepositories().values.toList();
+
+  Map<String, GitRepositoryDiscovery> _readRepositories() {
+    final active = {for (final source in _readSources().values) '${source.sourceUrl}\u0000${source.ref}'};
+    final value = readJson(paths.gitRepositoriesFile);
+    return {
+      if (value is List)
+        for (final entry in value)
+          if (GitRepositoryDiscovery.fromJson(entry) case final repository?)
+            if (active.contains(repository.key)) repository.key: repository,
+    };
+  }
+
+  void _writeRepositories(Map<String, GitRepositoryDiscovery> repositories) =>
+      writeJsonAtomic(paths.gitRepositoriesFile, [for (final repository in repositories.values) repository.toJson()]);
+
+  void dismissDiscovery(String sourceUrl, String ref, String repositoryPath) {
+    final repositories = _readRepositories();
+    final key = '$sourceUrl\u0000$ref';
+    final repository = repositories[key];
+    if (repository == null) return;
+    repositories[key] = GitRepositoryDiscovery(
+      sourceUrl: sourceUrl,
+      ref: ref,
+      seenPaths: repository.seenPaths,
+      pending: repository.pending.where((skill) => skill.repositoryPath != repositoryPath).toList(),
+    );
+    _writeRepositories(repositories);
+  }
+
+  void _observeCheckout(
+    Map<String, GitRepositoryDiscovery> repositories,
+    GitSourceRecord source,
+    String checkout,
+    Map<String, GitSourceRecord> records,
+  ) {
+    final skills = [
+      for (final path in findSkillDirs(checkout, limit: maxCandidates))
+        GitDiscoveredSkill(
+          name: p.equals(path, checkout) ? _repositoryName(source.sourceUrl) : p.basename(path),
+          repositoryPath: _repositoryPath(checkout, path),
+          description: _descriptionAt(path),
+        ),
+    ];
+    _observeRepository(repositories, source.sourceUrl, source.ref, skills, records);
+  }
+
+  void _observeRepository(
+    Map<String, GitRepositoryDiscovery> repositories,
+    String sourceUrl,
+    String ref,
+    List<GitDiscoveredSkill> skills,
+    Map<String, GitSourceRecord> records, {
+    bool preserveMissing = false,
+  }) {
+    final key = '$sourceUrl\u0000$ref';
+    final previous = repositories[key];
+    final pendingPaths = {
+      if (previous != null)
+        for (final skill in previous.pending) skill.repositoryPath,
+    };
+    final trackedPaths = {
+      for (final source in records.values)
+        if (source.sourceUrl == sourceUrl && source.ref == ref)
+          source.repositoryPath == '.' ? '' : source.repositoryPath,
+    };
+    repositories[key] = GitRepositoryDiscovery(
+      sourceUrl: sourceUrl,
+      ref: ref,
+      seenPaths: {...?previous?.seenPaths, for (final skill in skills) skill.repositoryPath},
+      pending: [
+        for (final skill in skills)
+          if (previous != null &&
+              !trackedPaths.contains(skill.repositoryPath) &&
+              (pendingPaths.contains(skill.repositoryPath) || !previous.seenPaths.contains(skill.repositoryPath)))
+            skill,
+        if (preserveMissing && previous != null)
+          for (final skill in previous.pending)
+            if (!trackedPaths.contains(skill.repositoryPath) &&
+                !skills.any((current) => current.repositoryPath == skill.repositoryPath))
+              skill,
+      ],
+    );
   }
 
   void _writeSources(Map<String, GitSourceRecord> records) {

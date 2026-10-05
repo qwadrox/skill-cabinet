@@ -289,6 +289,140 @@ Group findings by severity, with evidence and suggested fixes.
     expect(find.text('Update 9'), findsNothing);
     await tester.tap(find.text('Done'));
     await tester.pumpAndSettle();
+    // Newly discovered skills share the update sheet and keep replacement
+    // choices explicit through the existing import picker.
+    const discovered = [
+      GitDiscoveredSkill(
+        name: 'accessibility-audit',
+        repositoryPath: 'skills/accessibility-audit',
+        description: 'Find accessibility issues and suggest practical improvements.',
+      ),
+      GitDiscoveredSkill(
+        name: 'seo-schema',
+        repositoryPath: 'skills/seo-schema',
+        description: 'Review structured data and rich result eligibility.',
+      ),
+    ];
+    for (final skill in discovered) {
+      write(p.join(remote, skill.repositoryPath), '# ${skill.name}\n');
+    }
+    write(p.join(paths.storeDir, 'seo-schema'), '# My local schema skill\n');
+    for (final args in [
+      ['add', '.'],
+      ['commit', '-qm', 'new skills'],
+    ]) {
+      expect(Process.runSync('/usr/bin/git', ['-C', remote, ...args]).exitCode, 0);
+    }
+    final discovery = GitRepositoryDiscovery(
+      sourceUrl: remote,
+      ref: 'HEAD',
+      seenPaths: {for (final name in names) 'skills/$name', for (final skill in discovered) skill.repositoryPath},
+      pending: discovered,
+    );
+    writeJsonAtomic(paths.gitRepositoriesFile, [discovery.toJson()]);
+    writeJsonAtomic(paths.gitSourcesFile, {
+      for (final entry in controller.gitSources.entries) entry.key: entry.value.toJson(),
+    });
+    controller.gitRepositories = [discovery];
+    controller.notice = const Notice.info('2 new skills available');
+    controller.selectAll();
+    for (final mode in [ThemeMode.light, ThemeMode.dark]) {
+      tester.platformDispatcher.platformBrightnessTestValue = mode == ThemeMode.dark
+          ? Brightness.dark
+          : Brightness.light;
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: key,
+          child: CabinetApp(controller: controller, themeMode: mode),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Review updates'), findsOneWidget);
+      showGitUpdatesSheet(tester.element(find.byType(SkillPane)));
+      await tester.pumpAndSettle();
+      expect(find.text('NEW SKILLS'), findsOneWidget);
+      expect(find.text('0 updates · 2 new'), findsOneWidget);
+      expect(find.text('Import…'), findsNWidgets(2));
+      expect(find.text(discovered.first.description), findsOneWidget);
+      expect(find.text('No updates available'), findsNothing);
+      await capture('updates-new-${mode.name}');
+      const explanation =
+          'New skills from this repository.\n'
+          'Import any you’d like to add to your library and track for updates.';
+      expect(find.text(explanation), findsNothing);
+      if (mode == ThemeMode.dark) {
+        final help = find.byWidgetPredicate((widget) => widget is MacosTooltip && widget.message == explanation);
+        final mouse = await tester.createGesture(kind: ui.PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        await tester.pump();
+        await mouse.moveTo(tester.getCenter(help));
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pumpAndSettle();
+        expect(find.text(explanation), findsOneWidget);
+        await capture('updates-new-tooltip-dark');
+        await mouse.removePointer();
+        await tester.pumpAndSettle();
+      }
+      await tester.tap(find.text('Done'));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> waitForWork(bool Function() finished) async {
+      for (var attempt = 0; attempt < 100; attempt++) {
+        await tester.pump();
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 25)));
+        await tester.pump();
+        if (finished()) return;
+      }
+      fail('Background operation did not finish');
+    }
+
+    controller.gitSources = {...controller.gitSources, 'seo-audit': records['seo-audit']!};
+    controller.selectAll();
+    showGitUpdatesSheet(tester.element(find.byType(SkillPane)));
+    await tester.pumpAndSettle();
+    expect(find.text('1 update · 2 new'), findsOneWidget);
+    expect(find.text('UPDATES'), findsOneWidget);
+    await capture('updates-and-new-dark');
+    await tester.tap(find.text('Update 1'));
+    await waitForWork(() => !controller.applyingGitUpdates);
+    await tester.pumpAndSettle();
+    expect(find.text('NEW SKILLS'), findsOneWidget);
+    expect(find.text('0 updates · 2 new'), findsOneWidget);
+    expect(find.text('Update 1'), findsNothing);
+
+    await tester.tap(find.text('Import…').last);
+    await waitForWork(() => find.text('SKILLS FOUND · 1').evaluate().isNotEmpty);
+    await tester.pumpAndSettle();
+    expect(find.text('SKILLS FOUND · 1'), findsOneWidget);
+    expect(find.text('0 selected'), findsOneWidget);
+    expect(tester.widget<PushButton>(find.widgetWithText(PushButton, 'Import & track')).onPressed, isNull);
+    await tester.tap(find.text('Cancel'));
+    await waitForWork(() => find.text('Loading…').evaluate().isEmpty);
+    await tester.pumpAndSettle();
+    expect(controller.newGitSkills, 2);
+    expect(File(p.join(paths.storeDir, 'seo-schema/SKILL.md')).readAsStringSync(), '# My local schema skill\n');
+
+    await tester.tap(find.text('Import…').first);
+    await waitForWork(() => find.text('SKILLS FOUND · 1').evaluate().isNotEmpty);
+    await tester.pumpAndSettle();
+    expect(find.text('SKILLS FOUND · 1'), findsOneWidget);
+    expect(find.text('1 selected'), findsOneWidget);
+    await tester.tap(find.text('Import & track'));
+    await waitForWork(() => controller.newGitSkills == 1 && find.text('Loading…').evaluate().isEmpty);
+    await tester.pumpAndSettle();
+    expect(controller.newGitSkills, 1);
+    expect(controller.library.has('accessibility-audit'), isTrue);
+    expect(controller.gitSources['accessibility-audit']!.repositoryPath, discovered.first.repositoryPath);
+    expect(File(paths.deploymentFile).existsSync(), isFalse);
+    expect(find.text('Import…'), findsOneWidget);
+    await tester.tap(find.text('Dismiss').last);
+    await waitForWork(() => controller.newGitSkills == 0);
+    await tester.pumpAndSettle();
+    expect(controller.newGitSkills, 0);
+    expect(find.text('No updates available'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
     debugDefaultTargetPlatformOverride = null;
     await tester.pumpWidget(const SizedBox());
   });

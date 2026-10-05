@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../domain/git_import.dart';
 import 'modal.dart';
 import 'git_changes_sheet.dart';
+import 'git_import_sheet.dart';
 import 'scope.dart';
 import 'style.dart';
 import 'widgets.dart';
@@ -31,6 +32,11 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
   bool _initialized = false;
   bool _checking = false;
   bool _applying = false;
+  bool _importing = false;
+  bool _choosingDiscovery = false;
+  String? _discoveryError;
+
+  bool get _busy => _applying || _importing;
 
   @override
   void didChangeDependencies() {
@@ -53,7 +59,7 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
   }
 
   Future<void> _check() async {
-    if (_checking || _applying) return;
+    if (_checking || _busy) return;
     setState(() {
       _checking = true;
       _failures = const {};
@@ -74,14 +80,14 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
   }
 
   Future<void> _apply() async {
-    if (_selected.isEmpty || _applying || _checking) return;
+    if (_selected.isEmpty || _busy || _checking) return;
     setState(() {
       _applying = true;
       _failures = const {};
     });
     final result = await CabinetScope.read(context).applyGitUpdates(_selected, reviewedRevisions: _reviewedRevisions);
     if (!mounted) return;
-    if (result.failures.isEmpty) {
+    if (result.failures.isEmpty && CabinetScope.read(context).newGitSkills == 0) {
       Navigator.of(context).pop();
       return;
     }
@@ -94,6 +100,66 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
     });
   }
 
+  Future<void> _importNew(GitRepositoryDiscovery repository, GitDiscoveredSkill skill) async {
+    if (_busy || _checking) return;
+    final controller = CabinetScope.read(context);
+    setState(() {
+      _importing = true;
+      _discoveryError = null;
+    });
+    try {
+      final outcome = await controller.previewGitRepository(repository);
+      final preview = outcome.preview;
+      if (!mounted) {
+        if (preview != null) await controller.discardGitPreview(preview);
+        return;
+      }
+      if (preview == null) {
+        setState(() => _discoveryError = outcome.error);
+        return;
+      }
+      try {
+        if (!preview.candidates.any((candidate) => candidate.repositoryPath == skill.repositoryPath)) {
+          setState(() => _discoveryError = '${skill.name} is no longer in this repository. Check for updates again.');
+          return;
+        }
+        setState(() => _choosingDiscovery = true);
+        final choice = await showGitImportSheet(context, preview, onlyPaths: {skill.repositoryPath});
+        if (mounted) setState(() => _choosingDiscovery = false);
+        if (!mounted || choice == null || choice.repositoryPaths.isEmpty) return;
+        await controller.importGit(preview, choice.repositoryPaths);
+        if (mounted) {
+          setState(() {
+            _selected.retainWhere((name) => controller.gitSources[name]?.state == GitTrackingState.updateAvailable);
+            if (controller.gitRepositories.any(
+              (current) =>
+                  current.key == repository.key &&
+                  current.pending.any((pending) => pending.repositoryPath == skill.repositoryPath),
+            )) {
+              _discoveryError = controller.notice.text;
+            }
+          });
+        }
+      } finally {
+        await controller.discardGitPreview(preview);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _importing = false;
+          _choosingDiscovery = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _dismissNew(GitRepositoryDiscovery repository, GitDiscoveredSkill skill) async {
+    if (_busy || _checking) return;
+    setState(() => _importing = true);
+    await CabinetScope.read(context).dismissGitDiscovery(repository, skill);
+    if (mounted) setState(() => _importing = false);
+  }
+
   void _review(GitSourceRecord source) {
     showGitChangesSheet(
       context,
@@ -103,7 +169,7 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
   }
 
   void _toggle(String name) {
-    if (_checking || _applying) return;
+    if (_checking || _busy) return;
     setState(() {
       if (!_selected.remove(name)) _selected.add(name);
     });
@@ -122,6 +188,11 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
     final checking = _checking || controller.checkingGitUpdates;
     final availableGroups = _groupByRepository(available);
     final otherGroups = _groupByRepository(others);
+    final discoveries = controller.gitRepositories.where((repository) => repository.pending.isNotEmpty).toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+    GitRepositoryDiscovery? discoveryFor(GitSourceRecord source) => discoveries
+        .where((repository) => repository.sourceUrl == source.sourceUrl && repository.ref == source.ref)
+        .firstOrNull;
     final allSelected = available.isNotEmpty && available.every((source) => _selected.contains(source.skillName));
 
     return Column(
@@ -142,7 +213,7 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
               IconAction(
                 icon: CupertinoIcons.arrow_clockwise,
                 tooltip: 'Check for updates',
-                onPressed: _applying || checking ? null : _check,
+                onPressed: _busy || checking ? null : _check,
               ),
             ],
           ),
@@ -169,7 +240,7 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
                   title: 'No Git-tracked skills',
                   message: Text('Skills imported from a Git repository will appear here.'),
                 )
-              : available.isEmpty && others.isEmpty
+              : available.isEmpty && others.isEmpty && discoveries.isEmpty
               ? const EmptyState(
                   icon: CupertinoIcons.checkmark_circle,
                   title: 'No updates available',
@@ -179,15 +250,28 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
                   shrinkWrap: true,
                   padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
                   children: [
+                    if (_importing && !_choosingDiscovery)
+                      const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Row(children: [ProgressCircle(radius: 7), SizedBox(width: 8), Text('Loading…')]),
+                      ),
+                    if (_discoveryError != null)
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Text(_discoveryError!, style: context.caption),
+                      ),
                     if (_failures.isNotEmpty) _FailureNote(_failures.length),
                     if (available.isNotEmpty) ...[
                       if (others.isNotEmpty) const SectionLabel('AVAILABLE'),
                       for (final group in availableGroups)
                         _RepositoryGroupCard(
                           sources: group,
+                          repository: discoveryFor(group.first),
+                          onImportNew: (skill) => _importNew(discoveryFor(group.first)!, skill),
+                          onDismissNew: (skill) => _dismissNew(discoveryFor(group.first)!, skill),
                           selected: _selected,
                           failures: _failures,
-                          enabled: !_applying && !checking,
+                          enabled: !_busy && !checking,
                           onToggle: _toggle,
                           onReview: _review,
                           onToggleAll: () => setState(() {
@@ -200,6 +284,17 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
                           }),
                         ),
                     ],
+                    for (final repository in discoveries)
+                      if (!available.any(
+                        (source) => source.sourceUrl == repository.sourceUrl && source.ref == repository.ref,
+                      ))
+                        _RepositoryGroupCard(
+                          sources: const [],
+                          repository: repository,
+                          enabled: !_busy && !checking,
+                          onImportNew: (skill) => _importNew(repository, skill),
+                          onDismissNew: (skill) => _dismissNew(repository, skill),
+                        ),
                     if (others.isNotEmpty) ...[
                       const SectionLabel('COULD NOT CHECK'),
                       for (final group in otherGroups) _RepositoryGroupCard(sources: group),
@@ -219,7 +314,7 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
                         : available.any((source) => _selected.contains(source.skillName))
                         ? null
                         : false,
-                    onChanged: checking || _applying
+                    onChanged: checking || _busy
                         ? null
                         : (_) => setState(() {
                             final names = available.map((source) => source.skillName);
@@ -238,14 +333,14 @@ class _GitUpdatesSheetState extends State<_GitUpdatesSheet> {
             PushButton(
               controlSize: ControlSize.large,
               secondary: true,
-              onPressed: _applying ? null : () => Navigator.of(context).pop(),
+              onPressed: _busy ? null : () => Navigator.of(context).pop(),
               child: Text(available.isEmpty || checking ? 'Done' : 'Cancel'),
             ),
             if (available.isNotEmpty && !checking) ...[
               const SizedBox(width: 10),
               PushButton(
                 controlSize: ControlSize.large,
-                onPressed: _selected.isEmpty || checking || _applying ? null : _apply,
+                onPressed: _selected.isEmpty || checking || _busy ? null : _apply,
                 child: _applying
                     ? const Row(
                         mainAxisSize: MainAxisSize.min,
@@ -299,8 +394,14 @@ class _RepositoryGroupCard extends StatelessWidget {
     this.onToggle,
     this.onToggleAll,
     this.onReview,
+    this.repository,
+    this.onImportNew,
+    this.onDismissNew,
   });
 
+  final GitRepositoryDiscovery? repository;
+  final void Function(GitDiscoveredSkill skill)? onImportNew;
+  final void Function(GitDiscoveredSkill skill)? onDismissNew;
   final List<GitSourceRecord> sources;
   final Set<String> selected;
   final Map<String, String> failures;
@@ -311,7 +412,9 @@ class _RepositoryGroupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final source = sources.first;
+    final sourceUrl = repository?.sourceUrl ?? sources.first.sourceUrl;
+    final ref = repository?.ref ?? sources.first.ref;
+    final pending = repository?.pending ?? const <GitDiscoveredSkill>[];
     final selectable = onToggle != null;
     final allSelected = sources.every((item) => selected.contains(item.skillName));
     final someSelected = sources.any((item) => selected.contains(item.skillName));
@@ -351,19 +454,25 @@ class _RepositoryGroupCard extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: MacosTooltip(
-                    message: '${source.sourceUrl}\n${source.ref}',
+                    message: '$sourceUrl\n$ref',
                     child: Text(
-                      _repositoryLabel(source.sourceUrl),
+                      _repositoryLabel(sourceUrl),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: context.mono.copyWith(color: context.secondaryLabel),
                     ),
                   ),
                 ),
+                if (pending.isNotEmpty)
+                  Text(
+                    '${sources.length} update${sources.length == 1 ? '' : 's'} · ${pending.length} new',
+                    style: context.caption,
+                  ),
               ],
             ),
           ),
           Container(height: 1, color: context.separator),
+          if (sources.isNotEmpty && pending.isNotEmpty) const SectionLabel('UPDATES'),
           for (final (folder, items) in folders) ...[
             if (folders.length > 1) FolderHeader(folder, count: items.length),
             for (final item in items)
@@ -375,6 +484,66 @@ class _RepositoryGroupCard extends StatelessWidget {
                 showStatus: !selectable,
                 onToggle: selectable ? () => onToggle!(item.skillName) : null,
                 onReview: selectable && enabled ? () => onReview?.call(item) : null,
+              ),
+          ],
+          if (pending.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 14, 10, 6),
+              child: Row(
+                children: [
+                  Text('NEW SKILLS', style: context.sectionLabel),
+                  const SizedBox(width: 6),
+                  MacosTooltip(
+                    message:
+                        'New skills from this repository.\n'
+                        'Import any you’d like to add to your library and track for updates.',
+                    child: MacosIcon(CupertinoIcons.info_circle, size: 13, color: context.tertiaryLabel),
+                  ),
+                ],
+              ),
+            ),
+            for (final skill in pending)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            skill.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.body.copyWith(fontWeight: FontWeight.w500),
+                          ),
+                          Text(skill.repositoryPath, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.mono),
+                          if (skill.description.isNotEmpty)
+                            Text(
+                              skill.description,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: context.caption,
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    PushButton(
+                      controlSize: ControlSize.small,
+                      secondary: true,
+                      onPressed: enabled ? () => onImportNew?.call(skill) : null,
+                      child: const Text('Import…'),
+                    ),
+                    const SizedBox(width: 8),
+                    PushButton(
+                      controlSize: ControlSize.small,
+                      secondary: true,
+                      onPressed: enabled ? () => onDismissNew?.call(skill) : null,
+                      child: const Text('Dismiss'),
+                    ),
+                  ],
+                ),
               ),
           ],
         ],
@@ -444,12 +613,7 @@ class _UpdateRow extends StatelessWidget {
                       style: context.body.copyWith(fontWeight: FontWeight.w500),
                     ),
                     if (checkError != null)
-                      Text(
-                        checkError,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: context.caption,
-                      ),
+                      Text(checkError, maxLines: 2, overflow: TextOverflow.ellipsis, style: context.caption),
                   ],
                 ),
               ),

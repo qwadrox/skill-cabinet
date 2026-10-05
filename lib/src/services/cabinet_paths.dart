@@ -23,6 +23,7 @@ class CabinetPaths {
   String get collectionsFile => p.join(cabinetDir, 'collections.json');
   String get deploymentFile => p.join(cabinetDir, 'deployment.json');
   String get gitSourcesFile => p.join(cabinetDir, 'git_sources.json');
+  String get gitRepositoriesFile => p.join(cabinetDir, 'git_repositories.json');
   String get githubSourcesFile => p.join(cabinetDir, 'github_sources.json');
 
   String inHome(String relative) => p.join(home, relative);
