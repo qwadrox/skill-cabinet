@@ -56,9 +56,34 @@ class CabinetShell extends StatefulWidget {
 class _CabinetShellState extends State<CabinetShell> {
   final _searchFocus = FocusNode();
   bool _dragging = false;
+  static const _updateChannel = MethodChannel('skill_cabinet/app_updates');
+  bool _canCheckForUpdates = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _updateChannel.setMethodCallHandler((call) async {
+      if (call.method == 'canCheckForUpdatesChanged' && mounted) {
+        setState(() => _canCheckForUpdates = call.arguments as bool);
+      }
+    });
+    _connectUpdater();
+  }
+
+  Future<void> _connectUpdater() async {
+    try {
+      final enabled = await _updateChannel.invokeMethod<bool>('canCheckForUpdates') ?? false;
+      if (mounted) setState(() => _canCheckForUpdates = enabled);
+    } on MissingPluginException {
+      // Offscreen Flutter tests do not host the native macOS updater.
+    }
+  }
+
+  Future<void> _checkForAppUpdates() => _updateChannel.invokeMethod<void>('checkForUpdates');
 
   @override
   void dispose() {
+    _updateChannel.setMethodCallHandler(null);
     _searchFocus.dispose();
     super.dispose();
   }
@@ -111,10 +136,18 @@ class _CabinetShellState extends State<CabinetShell> {
     final controller = CabinetScope.of(context);
     return PlatformMenuBar(
       menus: [
-        const PlatformMenu(
+        PlatformMenu(
           label: 'Skill Cabinet',
           menus: [
-            PlatformMenuItemGroup(members: [PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.about)]),
+            PlatformMenuItemGroup(
+              members: [
+                const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.about),
+                PlatformMenuItem(
+                  label: 'Check for App Updates…',
+                  onSelected: _canCheckForUpdates ? _checkForAppUpdates : null,
+                ),
+              ],
+            ),
             PlatformMenuItemGroup(
               members: [
                 PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
@@ -284,6 +317,7 @@ class _CabinetShellState extends State<CabinetShell> {
                 onSelected: () => showGitUpdatesSheet(context),
               ),
               ContextMenuEntry('Backup…', onSelected: () => showBackupSheet(context)),
+              ContextMenuEntry('Check for App Updates…', enabled: _canCheckForUpdates, onSelected: _checkForAppUpdates),
             ],
           ),
         ),

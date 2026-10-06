@@ -40,6 +40,12 @@ The cabinet stores the original skill folders in `~/.skill-cabinet` and links en
 
 Skill Cabinet is currently a macOS desktop app. It does not require an account or a cloud service; your library stays on your Mac unless you connect a backup repository.
 
+## App updates
+
+Skill Cabinet checks for new app versions in the background and shows a native macOS update window when one is available. You can also choose **Skill Cabinet → Check for App Updates…** or use the same action in the ⋯ toolbar menu. Downloading and installing an update requires your action; choose **Install and Relaunch** to replace the app and restart it. Your library in `~/.skill-cabinet` is kept.
+
+Updates are downloaded from GitHub Releases and verified using [Sparkle](https://sparkle-project.org/)'s Ed25519 signatures before extraction. Install the app in Applications first; an app running directly from a read-only DMG cannot update itself. Existing versions without Sparkle need one manual installation of a version that includes the updater.
+
 ## Backup
 
 Everything in `~/.skill-cabinet` is backed up automatically: your skills, collections, agents and their assignments, and where Git-imported skills came from.
@@ -75,7 +81,23 @@ fvm flutter test
 
 ## Publishing a release
 
-The [macOS release workflow](.github/workflows/release-macos.yml) runs when a version tag such as `v1.0.0` is pushed. It installs the Flutter version from `.fvmrc`, runs the tests, builds a universal macOS app, and publishes a DMG in GitHub Releases with generated release notes. The DMG includes a compact branded window with the app and an Applications shortcut. Its background and Finder layout are defined in `tool/dmg/`. No Apple account or signing secrets are required.
+The [macOS release workflow](.github/workflows/release-macos.yml) runs when a version tag such as `v1.0.0` is pushed. It installs the Flutter version from `.fvmrc`, runs the tests, builds a universal macOS app, and publishes a DMG with generated release notes and a signed `appcast.xml` in GitHub Releases. The DMG includes a compact branded window with the app and an Applications shortcut. Its background and Finder layout are defined in `tool/dmg/`.
+
+The updater uses `https://github.com/qwadrox/skill-cabinet/releases/latest/download/appcast.xml` as its stable feed URL. The workflow prepares a draft release, generates the appcast with embedded release notes, uploads the DMG and appcast, then publishes the complete release. No separate update server or GitHub Pages setup is needed. Every release designated as latest must include `appcast.xml`.
+
+The `SPARKLE_PRIVATE_KEY` repository secret is required. Its matching public key is embedded in `macos/Runner/Info.plist`. The private key is also stored locally in the login Keychain under Sparkle's `skill-cabinet` account. Keep a secure backup of this key: replacing the public key alone prevents installed copies from trusting new updates. The private key must never be committed. To transfer the existing key to GitHub Actions without printing it:
+
+```sh
+# Use the tools from the Sparkle 2.9.6 distribution.
+# The exported file is sensitive; use a private temporary directory and delete it.
+key_directory=$(mktemp -d)
+chmod 700 "$key_directory"
+./bin/generate_keys --account skill-cabinet -x "$key_directory/key"
+gh secret set SPARKLE_PRIVATE_KEY --repo qwadrox/skill-cabinet < "$key_directory/key"
+rm -rf "$key_directory"
+```
+
+Sparkle's archive signature is separate from Apple Developer ID signing and notarization. The workflow still does not require an Apple account; the existing macOS Gatekeeper instructions continue to apply. Sparkle is pinned to 2.9.6 in the Xcode project and in the workflow; update both together when upgrading it. This patched version preserves support for older macOS versions; Sparkle 2.10 raises the minimum to macOS 12.
 
 After committing and pushing the changes you want to release:
 
