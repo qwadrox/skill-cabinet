@@ -431,7 +431,7 @@ class DeploymentService {
 
   DeploymentSnapshot _commit(_State state) {
     try {
-      writeJsonAtomic(paths.deploymentFile, state.toJson());
+      writeStateJson(paths.deploymentFile, state.toJson());
       return _snapshot(state, Notice.none);
     } catch (e) {
       return _snapshot(_read(), Notice.error('Error: $e'));

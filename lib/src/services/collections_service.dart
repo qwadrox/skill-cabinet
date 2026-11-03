@@ -99,7 +99,7 @@ class CollectionsService {
 
   CollectionsSnapshot _commit(List<_StoredSet> state) {
     try {
-      writeJsonAtomic(paths.collectionsFile, {
+      writeStateJson(paths.collectionsFile, {
         'groups': [for (final s in state) s.toJson()],
       });
       return _snapshot(state, Notice.none);

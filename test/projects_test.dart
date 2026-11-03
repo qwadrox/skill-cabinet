@@ -141,6 +141,25 @@ void main() {
     expect(d.sync().projects, isEmpty);
   });
 
+  test('keeps what a newer version of the app wrote', () {
+    final d = DeploymentService(paths)..sync();
+    d.setProjectSet(project, 'Blog', enabled: true);
+    for (final file in [paths.deploymentFile, paths.collectionsFile]) {
+      final raw = jsonDecode(File(file).readAsStringSync()) as Map<String, dynamic>;
+      raw['future'] = {'kept': true};
+      File(file).writeAsStringSync(jsonEncode(raw));
+    }
+    d.setProjectSet(project, 'Engineering', enabled: true);
+    CollectionsService(paths).createSet('Later');
+    d.removeProject(project);
+    for (final file in [paths.deploymentFile, paths.collectionsFile]) {
+      final raw = jsonDecode(File(file).readAsStringSync()) as Map<String, dynamic>;
+      expect(raw['future'], {'kept': true}, reason: file);
+    }
+    // What this version owns it still writes, even empty.
+    expect(jsonDecode(File(paths.deploymentFile).readAsStringSync())['projects'], isEmpty);
+  });
+
   test('a worktree shares its repository’s exclude file', () {
     final worktree = p.join(home.path, 'Documents/genontech-wt');
     final gitDir = p.join(project, '.git/worktrees/wt');

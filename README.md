@@ -51,6 +51,8 @@ Skill Cabinet is currently a macOS desktop app. It does not require an account o
 
 ## App updates
 
+Whenever you switch back to Skill Cabinet, it reads your library, agents and projects again, so changes made meanwhile (by an agent, in Finder or in another copy of the app) show up without a refresh. At the same time it checks Git-tracked skills for updates, each repository at most once a day. **View → Refresh** (⌘R) is still there to reload by hand.
+
 Skill Cabinet checks for new app versions in the background and shows a native macOS update window when one is available. You can also choose **Skill Cabinet → Check for App Updates…** or use the same action in the ⋯ toolbar menu. Downloading and installing an update requires your action; choose **Install and Relaunch** to replace the app and restart it. Your library in `~/.skill-cabinet` is kept.
 
 Updates are downloaded from GitHub Releases and verified using [Sparkle](https://sparkle-project.org/)'s Ed25519 signatures before extraction. Install the app in Applications first; an app running directly from a read-only DMG cannot update itself. Existing versions without Sparkle need one manual installation of a version that includes the updater.

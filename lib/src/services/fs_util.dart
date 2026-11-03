@@ -72,6 +72,21 @@ void writeJsonAtomic(String path, Object json) {
   tmp.renameSync(path);
 }
 
+// Writes a state file the way writeJsonAtomic does, keeping the top-level
+// keys of the file on disk that [json] does not name. A newer version of
+// the app may have written them; an older one must not drop what it does
+// not understand. So new kinds of data go under new top-level keys, and
+// [json] names every key this version owns, empty or not.
+void writeStateJson(String path, Map<String, Object?> json) {
+  final current = readJson(path);
+  writeJsonAtomic(path, {
+    ...json,
+    if (current is Map)
+      for (final e in current.entries)
+        if (e.key is String && !json.containsKey(e.key)) e.key as String: e.value,
+  });
+}
+
 // The decoded JSON of a file, or null when it is missing or unreadable.
 Object? readJson(String path) {
   try {

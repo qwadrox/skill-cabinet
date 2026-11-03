@@ -99,7 +99,16 @@ class CabinetController extends ChangeNotifier {
 
   // ---- loading ----------------------------------------------------------------
 
-  Future<void> load() async {
+  // One load at a time: a focus while loading joins the running one.
+  Future<void> load() => _loading ??= _load().whenComplete(() {
+    _loading = null;
+    _loadedAt = DateTime.now();
+  });
+
+  Future<void>? _loading;
+  DateTime? _loadedAt;
+
+  Future<void> _load() async {
     try {
       await Future.wait([
         _backend.scan().then(_libraryLoaded),
@@ -115,8 +124,20 @@ class CabinetController extends ChangeNotifier {
     }
     loaded = true;
     notifyListeners();
+    // Each repository is checked at most once a day; this only asks.
     unawaited(checkGitUpdates(force: false, quiet: true));
   }
+
+  // The app came to the front: what changed meanwhile (an agent, another
+  // copy of the app, a project's folders, a new day for Git updates) shows
+  // without asking. Quiet, and not more often than [focusRefreshInterval].
+  Future<void> refreshOnFocus() async {
+    final last = _loadedAt;
+    if (!loaded || (last != null && DateTime.now().difference(last) < focusRefreshInterval)) return;
+    await load();
+  }
+
+  Duration focusRefreshInterval = const Duration(seconds: 10);
 
   // Re-reads everything, the previewed SKILL.md included (it may have
   // been edited outside the app).
@@ -675,8 +696,6 @@ class CabinetController extends ChangeNotifier {
       _failed(e);
     }
   }
-
-  Future<void> refreshProjects() => _discoverProjects().catchError(_failed);
 
   String _tilde(String path) => _backend.paths.tilde(path);
 

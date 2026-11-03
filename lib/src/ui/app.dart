@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:desktop_drop/desktop_drop.dart';
@@ -61,10 +62,13 @@ class _CabinetShellState extends State<CabinetShell> {
   bool _dragging = false;
   static const _updateChannel = MethodChannel('skill_cabinet/app_updates');
   bool _canCheckForUpdates = false;
+  // Coming back to the app reads again what may have changed meanwhile.
+  late final AppLifecycleListener _lifecycle;
 
   @override
   void initState() {
     super.initState();
+    _lifecycle = AppLifecycleListener(onResume: () => unawaited(_controller.refreshOnFocus()));
     _updateChannel.setMethodCallHandler((call) async {
       if (call.method == 'canCheckForUpdatesChanged' && mounted) {
         setState(() => _canCheckForUpdates = call.arguments as bool);
@@ -87,6 +91,7 @@ class _CabinetShellState extends State<CabinetShell> {
   @override
   void dispose() {
     _updateChannel.setMethodCallHandler(null);
+    _lifecycle.dispose();
     _searchFocus.dispose();
     super.dispose();
   }
@@ -338,7 +343,6 @@ class _CabinetShellState extends State<CabinetShell> {
             icon: CupertinoIcons.ellipsis_circle,
             tooltip: 'More actions',
             entries: [
-              ContextMenuEntry('Refresh', onSelected: controller.refresh),
               ContextMenuEntry(
                 'Manage Git Updates…',
                 enabled: controller.gitSources.isNotEmpty,
@@ -413,14 +417,6 @@ extension on _CabinetShellState {
         CustomToolbarItem(
           inToolbarBuilder: (context) =>
               IconAction(icon: CupertinoIcons.plus, tooltip: 'Add a project folder', size: 18, onPressed: _addProject),
-        ),
-        CustomToolbarItem(
-          inToolbarBuilder: (context) => IconAction(
-            icon: CupertinoIcons.arrow_clockwise,
-            tooltip: 'Look for projects again',
-            size: 16,
-            onPressed: controller.refresh,
-          ),
         ),
         const ToolBarSpacer(spacerUnits: 0.5),
         CustomToolbarItem(

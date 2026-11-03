@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -8,9 +9,7 @@ import 'package:skill_cabinet/src/services/cabinet_paths.dart';
 
 void writeSkill(String dir, String name, {String description = ''}) {
   final folder = Directory(p.join(dir, name))..createSync(recursive: true);
-  File(
-    p.join(folder.path, 'SKILL.md'),
-  ).writeAsStringSync('---\nname: $name\ndescription: $description\n---\n# Body\n');
+  File(p.join(folder.path, 'SKILL.md')).writeAsStringSync('---\nname: $name\ndescription: $description\n---\n# Body\n');
 }
 
 void main() {
@@ -44,6 +43,33 @@ void main() {
 
   // Adding a skill to a set is a change to the set, not to any agent:
   // what an agent has linked must come out the other side untouched.
+  test('coming to the front reads what changed outside, at most so often', () async {
+    final project = p.join(home.path, 'Code/site');
+    Directory(p.join(project, '.git')).createSync(recursive: true);
+    // Another copy of the app turns Web on for a project.
+    void turnOnElsewhere() {
+      final file = File(paths.deploymentFile);
+      final raw = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      raw['projects'] = {
+        '~/Code/site': {
+          'sets': ['Web'],
+        },
+      };
+      file.writeAsStringSync(jsonEncode(raw));
+    }
+
+    // The cabinet has written its state once.
+    await controller.setSetEnabled('Engineering', true);
+    turnOnElsewhere();
+    await controller.refreshOnFocus();
+    expect(controller.deployment.projects, isEmpty, reason: 'just loaded');
+
+    controller.focusRefreshInterval = Duration.zero;
+    await controller.refreshOnFocus();
+    expect(controller.deployment.project(project)?.sets, ['Web']);
+    expect(Link(p.join(project, '.claude/skills/delta')).existsSync(), isTrue);
+  });
+
   test('adding to an unassigned set enables nothing', () async {
     final agent = controller.selectedAgent!;
     await controller.setSkillEnabled('gamma', true);
