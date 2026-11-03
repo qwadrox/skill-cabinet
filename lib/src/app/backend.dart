@@ -235,6 +235,17 @@ class CabinetBackend {
     return _runOffQueue(() async => s.discover(extra));
   }
 
+  Future<List<ProjectIcon>> projectIconChoices(String path) {
+    final s = _projects;
+    return _runOffQueue(() async => s.iconChoices(path));
+  }
+
+  // Writes the cabinet's projects.json, so it is queued.
+  Future<void> setProjectIcon(String path, String? file) {
+    final s = _projects;
+    return _run(() => s.setIcon(path, file));
+  }
+
   // Backup
   Future<BackupStatus> backupStatus() {
     final s = _backup;

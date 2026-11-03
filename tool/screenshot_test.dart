@@ -3,6 +3,7 @@
 //   SKILL_CABINET_HOME=/path/to/sample-home fvm flutter test tool/screenshot_test.dart
 // Output goes to build/screenshots/.
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -12,11 +13,15 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:macos_ui/macos_ui.dart' show ProgressCircle;
 import 'package:skill_cabinet/src/app/cabinet_controller.dart';
+import 'package:skill_cabinet/src/app/rows.dart';
 import 'package:skill_cabinet/src/services/cabinet_paths.dart';
 import 'package:skill_cabinet/src/ui/agents_sheet.dart';
 import 'package:skill_cabinet/src/ui/backup_sheet.dart';
 import 'package:skill_cabinet/src/ui/app.dart';
+import 'package:skill_cabinet/src/ui/project_icon_sheet.dart';
+import 'package:skill_cabinet/src/ui/projects_pane.dart';
 import 'package:skill_cabinet/src/ui/skill_pane.dart';
 
 Future<void> _font(String family, List<String> files) async {
@@ -125,6 +130,33 @@ void main() {
     final first = controller.discoveredProjects.first.path;
     controller.selectProject(first);
     await shot('project-dark', mode: ThemeMode.dark);
+    // The icon picker, over the project with the most pictures.
+    final pictured = controller.allProjectRows.firstWhere(
+      (p) => p.name == 'NeoTracker',
+      orElse: () => controller.allProjectRows.first,
+    );
+    controller.selectProject(pictured.path);
+    await shot('project-icon-dark', mode: ThemeMode.dark);
+    unawaited(chooseProjectIcon(tester.element(find.byType(ProjectsPane)), pictured));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final pane = tester.element(find.byType(ProjectsPane));
+    await tester.runAsync(() async {
+      for (final icon in await controller.projectIconChoices(pictured.path)) {
+        final preview = icon.preview;
+        if (preview != null && !preview.endsWith('.svg')) await precacheImage(FileImage(File(preview)), pane);
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    });
+    // The picker's own lookup finishes on a real isolate; pump until it shows.
+    for (var i = 0; i < 20 && find.byType(ProgressCircle).evaluate().isNotEmpty; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pump(const Duration(milliseconds: 300));
+    await capture('project-icon-picker-dark', ThemeMode.dark);
+    Navigator.of(tester.element(find.byType(ProjectsPane)), rootNavigator: true).pop();
+    await tester.pumpAndSettle();
     controller.selectSet('Blog');
     await shot('set-reach-dark', mode: ThemeMode.dark);
     controller.selectAll();

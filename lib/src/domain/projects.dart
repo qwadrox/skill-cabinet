@@ -10,6 +10,7 @@ class ProjectInfo {
     required this.display,
     required this.sources,
     this.icon,
+    this.iconChosen = false,
     this.activity,
   });
 
@@ -20,8 +21,23 @@ class ProjectInfo {
   final String display;
   // Where it was found: 'bb', 'Claude Code', 'Codex'.
   final List<String> sources;
-  // Absolute path of a PNG logo found in the project; null shows a tile.
+  // Absolute path of a displayable logo (PNG, SVG, ...), the one the user
+  // chose or else the best found in the project; null shows a tile.
   final String? icon;
+  // The user picked the icon; false when it was found.
+  final bool iconChosen;
   // Last Git activity, for ordering; null when unknown.
   final DateTime? activity;
+}
+
+// A picture that could be a project's icon, offered for choosing.
+class ProjectIcon {
+  const ProjectIcon({required this.file, required this.label, required this.preview});
+
+  // What is stored when chosen: absolute path of the file.
+  final String file;
+  // Relative to the project when inside it, else ~/...
+  final String label;
+  // A displayable copy (ICO converted to PNG); null when it cannot be shown.
+  final String? preview;
 }

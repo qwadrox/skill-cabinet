@@ -3,6 +3,7 @@ import 'package:macos_ui/macos_ui.dart';
 
 import '../app/rows.dart';
 import 'modal.dart';
+import 'project_icon_sheet.dart';
 import 'scope.dart';
 import 'skill_pane.dart';
 import 'style.dart';
@@ -361,6 +362,64 @@ String? _ago(DateTime? time) {
   return '${months[time.month - 1]} ${time.year}';
 }
 
+// The project's icon in its header; clicking it picks another.
+class _EditableAvatar extends StatefulWidget {
+  const _EditableAvatar({required this.project});
+
+  final ProjectRow project;
+
+  @override
+  State<_EditableAvatar> createState() => _EditableAvatarState();
+}
+
+class _EditableAvatarState extends State<_EditableAvatar> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final project = widget.project;
+    return MacosTooltip(
+      message: 'Change Icon…',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: Semantics(
+          button: true,
+          label: 'Change icon of ${project.name}',
+          child: GestureDetector(
+            onTap: () => chooseProjectIcon(context, project),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                ProjectAvatar(icon: project.icon, name: project.name, size: 52, dimmed: !project.exists),
+                Positioned(
+                  right: -4,
+                  bottom: -4,
+                  child: AnimatedOpacity(
+                    opacity: _hovered ? 1 : 0,
+                    duration: const Duration(milliseconds: 120),
+                    child: Container(
+                      width: 20,
+                      height: 20,
+                      decoration: BoxDecoration(
+                        color: context.macos.canvasColor,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: context.separator),
+                      ),
+                      child: MacosIcon(CupertinoIcons.pencil, size: 12, color: context.secondaryLabel),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 List<Widget> _detail(BuildContext context, ProjectRow project) {
   final controller = CabinetScope.read(context);
   final sets = controller.projectSetRows;
@@ -381,7 +440,7 @@ List<Widget> _detail(BuildContext context, ProjectRow project) {
       ),
       child: Row(
         children: [
-          ProjectAvatar(icon: project.icon, name: project.name, size: 52, dimmed: !project.exists),
+          _EditableAvatar(project: project),
           const SizedBox(width: 14),
           Expanded(
             child: Column(

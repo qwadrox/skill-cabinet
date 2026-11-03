@@ -1,5 +1,11 @@
 // Project discovery: the folders the user works in, read from the places
-// coding agents remember them, never written.
+// coding agents remember them, never written. The only thing written is
+// the icon the user chose for a project, in the cabinet's projects.json:
+//
+//   {"icons": {"~/Documents/genontech": "public/logo.svg"}}
+//
+// keyed by the portable folder; the picture relative to the project when
+// it lies inside it, so a backup restored on another Mac still finds it.
 //
 //   bb            `bb project list --json` (~/.bb/bin/bb)    names and folders
 //   Claude Code   ~/.claude.json "projects"                  folders
@@ -63,17 +69,22 @@ class ProjectService {
       if (Directory(path).existsSync()) sources.putIfAbsent(path, () => []);
     }
 
-    final projects = [
-      for (final e in sources.entries)
+    final chosen = _chosenIcons();
+    final projects = <ProjectInfo>[];
+    for (final e in sources.entries) {
+      final picked = _chosenFile(e.key, chosen);
+      projects.add(
         ProjectInfo(
           path: e.key,
           name: names[e.key] ?? p.basename(e.key),
           display: paths.tilde(e.key),
           sources: e.value,
-          icon: _icon(e.key),
+          icon: picked != null ? _displayable(picked) : _icon(e.key),
+          iconChosen: picked != null,
           activity: _latest(_activity(e.key), used[e.key]),
         ),
-    ];
+      );
+    }
     projects.sort((a, b) {
       final byActivity = (b.activity ?? DateTime(0)).compareTo(a.activity ?? DateTime(0));
       return byActivity != 0 ? byActivity : a.name.toLowerCase().compareTo(b.name.toLowerCase());
@@ -190,6 +201,79 @@ class ProjectService {
 
   static int _version(String name) => int.tryParse(RegExp(r'\d+').firstMatch(name)?.group(0) ?? '') ?? 0;
 
+  // ---- chosen icons ---------------------------------------------------------
+
+  // Pictures to offer as the project's icon: the chosen one, then what
+  // looks like a logo in the project, best first.
+  List<ProjectIcon> iconChoices(String root, {int limit = 24}) {
+    final files = _trackedFiles(root) ?? _shallowFiles(root);
+    final scored = [
+      for (final file in files)
+        if (iconScore(file) case final score?) (file, score),
+    ]..sort((a, b) => a.$2.compareTo(b.$2));
+    final picked = _chosenFile(root, _chosenIcons());
+    final candidates = [
+      ?picked,
+      for (final (file, _) in scored.take(limit))
+        if (p.join(root, file) != picked) p.join(root, file),
+    ];
+    return [
+      for (final file in candidates)
+        ProjectIcon(
+          file: file,
+          label: p.isWithin(root, file) ? p.relative(file, from: root) : paths.tilde(file),
+          preview: _displayable(file),
+        ),
+    ];
+  }
+
+  // Remembers [file] as the project's icon; null goes back to the found one.
+  void setIcon(String root, String? file) {
+    final project = paths.portable(root);
+    final icons = Map<String, Object?>.of(_chosenIcons());
+    if (file == null) {
+      icons.remove(project);
+    } else {
+      final full = paths.resolveUser(file);
+      if (!File(full).existsSync()) throw ArgumentError('$file is not a file');
+      if (!_formats.containsKey(p.extension(full).toLowerCase())) {
+        throw ArgumentError('${p.basename(full)} is not a PNG, JPEG, WebP, SVG or ICO picture');
+      }
+      final normalizedRoot = p.normalize(root);
+      icons[project] = p.isWithin(normalizedRoot, full) ? p.relative(full, from: normalizedRoot) : paths.portable(full);
+    }
+    final raw = readJson(paths.projectsFile);
+    final json = raw is Map ? Map<String, Object?>.of(raw.cast<String, Object?>()) : <String, Object?>{};
+    if (icons.isEmpty) {
+      json.remove('icons');
+    } else {
+      json['icons'] = Map.fromEntries(icons.entries.toList()..sort((a, b) => a.key.compareTo(b.key)));
+    }
+    if (json.isEmpty && !File(paths.projectsFile).existsSync()) return;
+    writeJsonAtomic(paths.projectsFile, json);
+  }
+
+  Map<String, Object?> _chosenIcons() {
+    final raw = readJson(paths.projectsFile);
+    final icons = raw is Map ? raw['icons'] : null;
+    return icons is Map ? icons.cast<String, Object?>() : const {};
+  }
+
+  // The chosen picture of the project at [root], absolute; null when none
+  // was chosen or it is gone.
+  String? _chosenFile(String root, Map<String, Object?> chosen) {
+    final stored = chosen[paths.portable(root)];
+    if (stored is! String || stored.isEmpty) return null;
+    final full = stored.startsWith('~') || p.isAbsolute(stored)
+        ? paths.resolveUser(stored)
+        : p.normalize(p.join(root, stored));
+    return File(full).existsSync() ? full : null;
+  }
+
+  String? _displayable(String file) => p.extension(file).toLowerCase() == '.ico' ? _icoAsPng(file) : file;
+
+  // ---- found icons ----------------------------------------------------------
+
   // The project's logo, as bb finds one: among the files Git tracks (any
   // depth, so a monorepo's app counts), the best-ranked icon-like name.
   // A folder that is not a repository is searched a few levels deep.
@@ -204,9 +288,7 @@ class ProjectService {
         bestScore = score;
       }
     }
-    if (best == null) return null;
-    final path = p.join(root, best);
-    return p.extension(path).toLowerCase() == '.ico' ? _icoAsPng(path) : path;
+    return best == null ? null : _displayable(p.join(root, best));
   }
 
   // ICO is not among the formats Flutter promises to decode, so it is

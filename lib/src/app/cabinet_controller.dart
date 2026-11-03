@@ -660,6 +660,22 @@ class CabinetController extends ChangeNotifier {
     }
   }
 
+  // Pictures in the project that could be its icon, for the picker.
+  Future<List<ProjectIcon>> projectIconChoices(String path) => _backend.projectIconChoices(path);
+
+  // The icon the user chose for a project; null goes back to the one
+  // found in it.
+  Future<void> setProjectIcon(String path, String? file) async {
+    _clearNotice();
+    try {
+      await _backend.setProjectIcon(path, file);
+      await _discoverProjects();
+      _backupSoon();
+    } catch (e) {
+      _failed(e);
+    }
+  }
+
   Future<void> refreshProjects() => _discoverProjects().catchError(_failed);
 
   String _tilde(String path) => _backend.paths.tilde(path);

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:skill_cabinet/src/domain/health.dart';
+import 'package:skill_cabinet/src/domain/projects.dart';
 import 'package:skill_cabinet/src/services/cabinet_paths.dart';
 import 'package:skill_cabinet/src/services/collections_service.dart';
 import 'package:skill_cabinet/src/services/deployment_service.dart';
@@ -224,6 +225,44 @@ void main() {
       ]);
       expect(ranked(['public/favicon-16x16.png', 'public/favicon-96x96.png']).first, 'public/favicon-96x96.png');
       expect(ranked(['node_modules/x/favicon.png', 'test/fixtures/logo.png']), isEmpty);
+    });
+
+    test('remembers the icon the user chose, relative to the project', () {
+      File(p.join(project, '.claude.json')).writeAsStringSync('');
+      File(p.join(home.path, '.claude.json')).writeAsStringSync(
+        jsonEncode({
+          'projects': {project: {}},
+        }),
+      );
+      for (final name in ['public/favicon.png', 'brand/mark.svg', 'brand/old.ico']) {
+        File(p.join(project, name))
+          ..createSync(recursive: true)
+          ..writeAsBytesSync([0]);
+      }
+      final service = ProjectService(paths);
+      ProjectInfo only() => service.discover(const []).single;
+      expect(only().icon, p.join(project, 'public/favicon.png'));
+      expect(only().iconChosen, isFalse);
+
+      service.setIcon(project, p.join(project, 'brand/mark.svg'));
+      expect(only().icon, p.join(project, 'brand/mark.svg'));
+      expect(only().iconChosen, isTrue);
+      expect(jsonDecode(File(paths.projectsFile).readAsStringSync()), {
+        'icons': {'~/Documents/genontech': 'brand/mark.svg'},
+      });
+      // The chosen picture is offered first, then the logo-like ones.
+      expect(service.iconChoices(project).map((i) => i.label), ['brand/mark.svg', 'public/favicon.png']);
+
+      expect(() => service.setIcon(project, p.join(project, 'nope.png')), throwsArgumentError);
+      expect(() => service.setIcon(project, p.join(project, '.claude.json')), throwsArgumentError);
+
+      // Gone from the project: the found icon again.
+      File(p.join(project, 'brand/mark.svg')).deleteSync();
+      expect(only().icon, p.join(project, 'public/favicon.png'));
+      expect(only().iconChosen, isFalse);
+
+      service.setIcon(project, null);
+      expect(jsonDecode(File(paths.projectsFile).readAsStringSync()), isEmpty);
     });
   });
 }

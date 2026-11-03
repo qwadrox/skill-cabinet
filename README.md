@@ -37,6 +37,8 @@ Open **Projects** in the sidebar to see the Git repositories you work in, found 
 
 A set's page shows where it is on: globally for which agents, and for which projects. The project links are listed in the repository's local `.git/info/exclude`, so they never appear as changes. Skills the project already has in those folders are left alone. Turning the last set off removes the links and any skills folder the cabinet emptied.
 
+Each project shows the logo found among its tracked files (an app icon, favicon or logo, as PNG, SVG, JPEG, WebP or ICO). If the wrong picture was picked, click the icon in the project's header: choose another picture from the project, any image with **Choose Image…**, or go back with **Use Found Icon**.
+
 ## Getting started on macOS
 
 1. Download the macOS DMG from [GitHub Releases](https://github.com/qwadrox/skill-cabinet/releases), or build **Skill Cabinet** from source. The release download supports Apple Silicon and Intel Macs.
@@ -123,6 +125,7 @@ Skill Cabinet stores its data locally:
 ~/.skill-cabinet/skills/          imported skills
 ~/.skill-cabinet/collections.json collections and membership
 ~/.skill-cabinet/deployment.json  agents, assignments and project sets
+~/.skill-cabinet/projects.json    project icons you chose
 ~/.skill-cabinet/git_sources.json tracked Git repository sources
 ~/.skill-cabinet/git_repositories.json seen skills and pending discoveries per repository/branch
 ~/.skill-cabinet/.git/            backup history

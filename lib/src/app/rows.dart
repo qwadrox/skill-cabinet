@@ -111,6 +111,7 @@ class ProjectRow {
     required this.exists,
     required this.listed,
     this.icon,
+    this.iconChosen = false,
     this.activity,
     this.sources = const [],
   });
@@ -125,6 +126,7 @@ class ProjectRow {
   // The deployment has an entry for it (sets, or added by hand).
   final bool listed;
   final String? icon;
+  final bool iconChosen;
   final DateTime? activity;
   final List<String> sources;
 
@@ -266,6 +268,7 @@ extension CabinetRows on CabinetController {
       exists: assignment?.exists ?? true,
       listed: assignment != null,
       icon: info?.icon,
+      iconChosen: info?.iconChosen ?? false,
       activity: info?.activity,
       sources: info?.sources ?? const [],
     );
