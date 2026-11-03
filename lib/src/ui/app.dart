@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/cupertino.dart';
@@ -14,6 +16,7 @@ import 'modal.dart';
 import 'git_import_sheet.dart';
 import 'git_updates_sheet.dart';
 import 'preview_pane.dart';
+import 'projects_pane.dart';
 import 'scope.dart';
 import 'sidebar.dart';
 import 'skill_pane.dart';
@@ -108,6 +111,19 @@ class _CabinetShellState extends State<CabinetShell> {
     await controller.importSkills(choice.paths, move: choice.move);
   }
 
+  // Projects the finders missed: any folders, picked in the open panel
+  // or dropped on the projects.
+  Future<void> _addProject() async {
+    final picked = await getDirectoryPaths(confirmButtonText: 'Add Project');
+    await _addProjects(picked.whereType<String>().toList());
+  }
+
+  Future<void> _addProjects(List<String> paths) async {
+    for (final path in paths) {
+      if (FileSystemEntity.isDirectorySync(path)) await _controller.addProject(path);
+    }
+  }
+
   // The URL sheet clones before it closes, so it hands back a preview
   // rather than a URL.
   Future<void> _importGit() async {
@@ -169,6 +185,7 @@ class _CabinetShellState extends State<CabinetShell> {
                   onSelected: _pickImport,
                 ),
                 PlatformMenuItem(label: 'Import from Git…', onSelected: _importGit),
+                PlatformMenuItem(label: 'Add Project Folder…', onSelected: _addProject),
                 PlatformMenuItem(label: 'Open Store in Finder', onSelected: controller.openStore),
               ],
             ),
@@ -220,7 +237,13 @@ class _CabinetShellState extends State<CabinetShell> {
         onDragExited: (_) => setState(() => _dragging = false),
         onDragDone: (details) {
           setState(() => _dragging = false);
-          _import([for (final file in details.files) file.path]);
+          final dropped = [for (final file in details.files) file.path];
+          // Over the projects, a folder is a project to add, not skills.
+          if (controller.inProjects) {
+            _addProjects(dropped);
+          } else {
+            _import(dropped);
+          }
         },
         child: Stack(
           children: [
@@ -231,8 +254,9 @@ class _CabinetShellState extends State<CabinetShell> {
                 children: [
                   ContentArea(
                     minWidth: 420,
-                    builder: (context, scroll) =>
-                        SkillPane(scroll: scroll, onImport: _pickImport, onImportGit: _importGit),
+                    builder: (context, scroll) => controller.inProjects
+                        ? ProjectsPane(scroll: scroll, onAddProject: _addProject)
+                        : SkillPane(scroll: scroll, onImport: _pickImport, onImportGit: _importGit),
                   ),
                   if (controller.previewName != null)
                     // noScrollBar: the pane's own scrollbar would span the
@@ -248,7 +272,10 @@ class _CabinetShellState extends State<CabinetShell> {
                 ],
               ),
             ),
-            if (_dragging) const Positioned.fill(child: IgnorePointer(child: _DropOverlay())),
+            if (_dragging)
+              Positioned.fill(
+                child: IgnorePointer(child: _DropOverlay(projects: controller.inProjects)),
+              ),
           ],
         ),
       ),
@@ -256,6 +283,7 @@ class _CabinetShellState extends State<CabinetShell> {
   }
 
   ToolBar _toolBar(BuildContext context, CabinetController controller) {
+    if (controller.inProjects) return _projectsToolBar(context, controller);
     final set = controller.selectedSet;
     final agent = controller.selectedAgent;
     final rows = controller.skillRows;
@@ -338,6 +366,79 @@ class _CabinetShellState extends State<CabinetShell> {
   }
 }
 
+extension on _CabinetShellState {
+  ToolBar _projectsToolBar(BuildContext context, CabinetController controller) {
+    final project = controller.selectedProject;
+    final all = controller.allProjectRows;
+    final withSets = all.where((r) => r.sets.isNotEmpty).length;
+    final subtitle = project == null
+        ? '${all.length} project${all.length == 1 ? '' : 's'} · $withSets with skill sets'
+        : project.sets.isEmpty
+        ? 'No skill sets here yet'
+        : '${project.sets.length} set${project.sets.length == 1 ? '' : 's'} · ${project.linked} skill links';
+    return ToolBar(
+      titleWidth: 320,
+      title: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (project != null) ...[
+                HoverRow(
+                  radius: 5,
+                  padding: const EdgeInsets.all(2),
+                  semanticLabel: 'All projects',
+                  onPressed: controller.selectProjects,
+                  builder: (context, _) =>
+                      MacosIcon(CupertinoIcons.chevron_left, size: 13, color: context.secondaryLabel),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Flexible(
+                child: Text(
+                  project?.name ?? 'Projects',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.macos.typography.headline.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.caption.copyWith(fontSize: 11)),
+        ],
+      ),
+      actions: [
+        CustomToolbarItem(
+          inToolbarBuilder: (context) =>
+              IconAction(icon: CupertinoIcons.plus, tooltip: 'Add a project folder', size: 18, onPressed: _addProject),
+        ),
+        CustomToolbarItem(
+          inToolbarBuilder: (context) => IconAction(
+            icon: CupertinoIcons.arrow_clockwise,
+            tooltip: 'Look for projects again',
+            size: 16,
+            onPressed: controller.refresh,
+          ),
+        ),
+        const ToolBarSpacer(spacerUnits: 0.5),
+        CustomToolbarItem(
+          inToolbarBuilder: (context) => SizedBox(
+            width: 220,
+            child: MacosSearchField<void>(
+              controller: controller.searchField,
+              focusNode: _searchFocus,
+              placeholderStyle: context.placeholder,
+              placeholder: 'Search projects',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // An icon with a chevron that opens a menu under itself, in place of
 // macos_ui's ToolBarPullDownButton (see showContextMenu for why).
 class _ToolbarMenu extends StatelessWidget {
@@ -379,7 +480,10 @@ class _ToolbarMenu extends StatelessWidget {
 }
 
 class _DropOverlay extends StatelessWidget {
-  const _DropOverlay();
+  const _DropOverlay({required this.projects});
+
+  // Dropping on the projects adds folders as projects.
+  final bool projects;
 
   @override
   Widget build(BuildContext context) {
@@ -405,9 +509,14 @@ class _DropOverlay extends StatelessWidget {
             children: [
               MacosIcon(CupertinoIcons.square_arrow_down, size: 30, color: accent),
               const SizedBox(height: 8),
-              Text('Drop to import', style: context.macos.typography.headline),
+              Text(projects ? 'Drop to add projects' : 'Drop to import', style: context.macos.typography.headline),
               const SizedBox(height: 2),
-              Text('Skill folders are copied into the cabinet', style: context.caption),
+              Text(
+                projects
+                    ? 'Each folder becomes a project you can give skill sets'
+                    : 'Skill folders are copied into the cabinet',
+                style: context.caption,
+              ),
             ],
           ),
         ),

@@ -5,11 +5,13 @@ import '../domain/collections.dart';
 import '../domain/deployment.dart';
 import '../domain/git_import.dart';
 import '../domain/library.dart';
+import '../domain/projects.dart';
 import '../services/backup_service.dart';
 import '../services/cabinet_paths.dart';
 import '../services/collections_service.dart';
 import '../services/deployment_service.dart';
 import '../services/library_service.dart';
+import '../services/project_service.dart';
 import '../services/git_import_service.dart';
 
 // The services, run off the UI isolate. Holds nothing but the paths, so
@@ -27,6 +29,7 @@ class CabinetBackend {
   CollectionsService get _collections => CollectionsService(paths);
   DeploymentService get _deployment => DeploymentService(paths);
   BackupService get _backup => BackupService(paths);
+  ProjectService get _projects => ProjectService(paths);
 
   Future<T> _run<T>(T Function() op) {
     final result = _tail.then((_) => Isolate.run(op));
@@ -208,6 +211,28 @@ class CabinetBackend {
   Future<DeploymentSnapshot> removeAgent(String key) {
     final s = _deployment;
     return _run(() => s.removeAgent(key));
+  }
+
+  Future<DeploymentSnapshot> addProject(String path) {
+    final s = _deployment;
+    return _run(() => s.addProject(path));
+  }
+
+  Future<DeploymentSnapshot> setProjectSet(String path, String set, {required bool enabled}) {
+    final s = _deployment;
+    return _run(() => s.setProjectSet(path, set, enabled: enabled));
+  }
+
+  Future<DeploymentSnapshot> removeProject(String path) {
+    final s = _deployment;
+    return _run(() => s.removeProject(path));
+  }
+
+  // Projects: reads other tools' files and runs bb, writes nothing, so it
+  // stays off the queue.
+  Future<List<ProjectInfo>> discoverProjects(List<String> extra) {
+    final s = _projects;
+    return _runOffQueue(() async => s.discover(extra));
   }
 
   // Backup

@@ -173,6 +173,8 @@ class _SidebarList extends StatelessWidget {
     final controller = CabinetScope.of(context);
     final sets = controller.setRows;
     final agent = controller.selectedAgent;
+    final projects = controller.activeProjectRows;
+    final selectedProject = controller.selectedProjectPath;
 
     return ListView(
       controller: scroll,
@@ -180,7 +182,7 @@ class _SidebarList extends StatelessWidget {
       children: [
         const SectionLabel('LIBRARY', padding: EdgeInsets.fromLTRB(8, 8, 8, 4)),
         _SidebarItem(
-          selected: controller.selectedSet == null,
+          selected: controller.selectedSet == null && !controller.inProjects,
           onPressed: controller.selectAll,
           leading: MacosIcon(CupertinoIcons.square_stack_3d_up, size: 15, color: context.accent),
           label: 'All skills',
@@ -190,6 +192,13 @@ class _SidebarList extends StatelessWidget {
                 : '${controller.activeCount}/${controller.library.skills.length}',
             style: context.caption,
           ),
+        ),
+        _SidebarItem(
+          selected: controller.inProjects && selectedProject == null,
+          onPressed: controller.selectProjects,
+          leading: MacosIcon(CupertinoIcons.folder, size: 15, color: context.accent),
+          label: 'Projects',
+          trailing: Text(projects.isEmpty ? '' : '${projects.length}', style: context.caption),
         ),
         const SectionLabel('SKILL SETS', padding: EdgeInsets.fromLTRB(8, 16, 8, 4)),
         if (sets.isEmpty)
@@ -221,6 +230,20 @@ class _SidebarList extends StatelessWidget {
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (row.projects > 0) ...[
+                  MacosTooltip(
+                    message: 'On for ${row.projects} project${row.projects == 1 ? '' : 's'}',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        MacosIcon(CupertinoIcons.folder_fill, size: 10, color: context.tertiaryLabel),
+                        const SizedBox(width: 2),
+                        Text('${row.projects}', style: context.caption.copyWith(color: context.tertiaryLabel)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Text(agent == null ? '${row.total}' : '${row.active}/${row.total}', style: context.caption),
                 if (agent != null) ...[
                   const SizedBox(width: 8),
@@ -238,6 +261,22 @@ class _SidebarList extends StatelessWidget {
               ],
             ),
           ),
+        if (projects.isNotEmpty) ...[
+          const SectionLabel('PROJECTS', padding: EdgeInsets.fromLTRB(8, 16, 8, 4)),
+          for (final project in projects)
+            _SidebarItem(
+              selected: project.path == selectedProject,
+              onPressed: () => controller.selectProject(project.path),
+              leading: ProjectAvatar(icon: project.icon, name: project.name, size: 16, dimmed: !project.exists),
+              label: project.name,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final set in project.sets.take(4)) ...[const SizedBox(width: 3), SetDot(set.color, size: 7)],
+                ],
+              ),
+            ),
+        ],
       ],
     );
   }

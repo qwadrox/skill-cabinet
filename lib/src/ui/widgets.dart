@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/cupertino.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:macos_ui/macos_ui.dart';
 
 import '../domain/collections.dart';
@@ -423,4 +426,81 @@ class DangerButton extends StatelessWidget {
     data: context.macos.copyWith(accentColor: AccentColor.red),
     child: PushButton(controlSize: ControlSize.large, onPressed: onPressed, child: Text(label)),
   );
+}
+
+// A project's logo, found in its folder, on a rounded tile; projects
+// without one get their initial on a tile tinted from the name, so each
+// keeps the same color.
+class ProjectAvatar extends StatelessWidget {
+  const ProjectAvatar({super.key, required this.icon, required this.name, this.size = 36, this.dimmed = false});
+
+  final String? icon;
+  final String name;
+  final double size;
+  final bool dimmed;
+
+  static const _tints = [
+    MacosColors.systemBlueColor,
+    MacosColors.systemPurpleColor,
+    MacosColors.systemGreenColor,
+    MacosColors.systemPinkColor,
+    MacosColors.systemOrangeColor,
+    MacosColors.systemTealColor,
+    MacosColors.systemIndigoColor,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(size * 0.24);
+    final logo = icon;
+    final Widget tile;
+    if (logo != null) {
+      tile = Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: context.isDark ? const Color(0xFF26262A) : const Color(0xFFFFFFFF),
+          border: Border.all(color: context.separator),
+          borderRadius: radius,
+        ),
+        clipBehavior: Clip.antiAlias,
+        padding: EdgeInsets.all(size * 0.12),
+        child: logo.toLowerCase().endsWith('.svg')
+            ? SvgPicture.file(
+                File(logo),
+                fit: BoxFit.contain,
+                semanticsLabel: name,
+                errorBuilder: (context, _, _) => _initial(context, radius),
+              )
+            : Image.file(
+                File(logo),
+                filterQuality: FilterQuality.medium,
+                fit: BoxFit.contain,
+                semanticLabel: name,
+                errorBuilder: (context, _, _) => _initial(context, radius),
+              ),
+      );
+    } else {
+      tile = _initial(context, radius);
+    }
+    return Opacity(opacity: dimmed ? 0.45 : 1, child: tile);
+  }
+
+  Widget _initial(BuildContext context, BorderRadius radius) {
+    final tint = context.resolve(_tints[name.codeUnits.fold(0, (a, b) => a + b) % _tints.length]);
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.18),
+        border: Border.all(color: tint.withValues(alpha: 0.35)),
+        borderRadius: radius,
+      ),
+      child: Text(
+        name.isEmpty ? '?' : name.characters.first.toUpperCase(),
+        style: context.body.copyWith(color: tint, fontSize: size * 0.44, fontWeight: FontWeight.w700, height: 1),
+      ),
+    );
+  }
 }

@@ -17,6 +17,7 @@ import '../domain/deployment.dart';
 import '../domain/git_import.dart';
 import '../domain/library.dart';
 import '../domain/notice.dart';
+import '../domain/projects.dart';
 import '../services/backup_service.dart';
 import '../services/cabinet_paths.dart';
 import 'backend.dart';
@@ -48,10 +49,16 @@ class CabinetController extends ChangeNotifier {
   int get newGitSkills => gitRepositories.fold(0, (count, repository) => count + repository.pending.length);
   CollectionsSnapshot collections = CollectionsSnapshot.empty;
   DeploymentSnapshot deployment = DeploymentSnapshot.empty;
+  // Projects found on this Mac, and the ones the deployment lists.
+  List<ProjectInfo> discoveredProjects = const [];
   bool loaded = false;
 
   // The selected skill set, by name; null = all skills.
   String? _selectedSet;
+  // The projects overview, or one project by folder, in place of the
+  // skill list. Selecting a set or "All skills" leaves them.
+  bool _showingProjects = false;
+  String? _selectedProject;
   // The agent whose assignments the switches edit, by key.
   String? _selectedAgent;
   // The search field's own controller: the query has one home, so an
@@ -78,7 +85,11 @@ class CabinetController extends ChangeNotifier {
 
   String get search => searchField.text;
 
-  SkillSet? get selectedSet => _selectedSet == null ? null : collections.named(_selectedSet!);
+  SkillSet? get selectedSet => _selectedSet == null || inProjects ? null : collections.named(_selectedSet!);
+
+  // The projects overview or a project is shown instead of skills.
+  bool get inProjects => _showingProjects || _selectedProject != null;
+  String? get selectedProjectPath => _selectedProject;
 
   Agent? get selectedAgent {
     final agents = deployment.agents;
@@ -95,7 +106,7 @@ class CabinetController extends ChangeNotifier {
         _backend.gitSources().then(_gitSourcesLoaded),
         _backend.gitRepositories().then(_gitRepositoriesLoaded),
         _backend.listSets().then(_collectionsLoaded),
-        _backend.sync().then(_deploymentLoaded),
+        _backend.sync().then(_deploymentLoaded).then((_) => _discoverProjects()),
         _backend.backupStatus().then(_backupLoaded),
         if (previewName != null) _backend.preview(previewName!).then(_previewLoaded),
       ]);
@@ -160,6 +171,11 @@ class CabinetController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> _discoverProjects() async {
+    discoveredProjects = await _backend.discoverProjects([for (final p in deployment.projects) p.path]);
+    notifyListeners();
+  }
+
   void _backupLoaded(BackupStatus status) {
     backup = status;
     notifyListeners();
@@ -198,14 +214,39 @@ class CabinetController extends ChangeNotifier {
   // thing worse than no filter.
   void selectAll() {
     _selectedSet = null;
+    _leaveProjects();
     _clearQueries();
     notifyListeners();
   }
 
   void selectSet(String name) {
     _selectedSet = name;
+    _leaveProjects();
     _clearQueries();
     notifyListeners();
+  }
+
+  void selectProjects() {
+    _showingProjects = true;
+    _selectedProject = null;
+    previewName = null;
+    preview = null;
+    _clearQueries();
+    notifyListeners();
+  }
+
+  void selectProject(String path) {
+    _showingProjects = false;
+    _selectedProject = path;
+    previewName = null;
+    preview = null;
+    _clearQueries();
+    notifyListeners();
+  }
+
+  void _leaveProjects() {
+    _showingProjects = false;
+    _selectedProject = null;
   }
 
   void selectAgent(String key) {
@@ -581,6 +622,47 @@ class CabinetController extends ChangeNotifier {
     _clearNotice();
     await _backend.removeAgent(key).then(_deploymentLoaded, onError: _failed);
   }
+
+  // ---- projects ---------------------------------------------------------------
+
+  // A set on or off for a project, for every agent that reads project
+  // skills. Independent of the selected agent's global switches.
+  Future<void> setProjectSet(String path, String set, bool enabled) async {
+    deployment = deployment.withProjectSet(path, _tilde(path), set, enabled);
+    _clearNotice();
+    await _backend.setProjectSet(path, set, enabled: enabled).then(_deploymentLoaded, onError: _failed);
+  }
+
+  // A folder picked by hand is listed and shown.
+  Future<void> addProject(String path) async {
+    _clearNotice();
+    try {
+      final snapshot = await _backend.addProject(path);
+      _deploymentLoaded(snapshot);
+      final full = p.normalize(path);
+      if (snapshot.project(full) != null) selectProject(full);
+      await _discoverProjects();
+    } catch (e) {
+      _failed(e);
+    }
+  }
+
+  // Forgets a project's sets and unlinks them. A found project stays
+  // listed, with nothing on.
+  Future<void> removeProject(String path) async {
+    _clearNotice();
+    if (_selectedProject == path) selectProjects();
+    try {
+      _deploymentLoaded(await _backend.removeProject(path));
+      await _discoverProjects();
+    } catch (e) {
+      _failed(e);
+    }
+  }
+
+  Future<void> refreshProjects() => _discoverProjects().catchError(_failed);
+
+  String _tilde(String path) => _backend.paths.tilde(path);
 
   // ---- backup -----------------------------------------------------------------
 

@@ -2,27 +2,50 @@
 // tool_adapters.rs. `dir` (relative to \$HOME) receives the links; `detect`
 // existing means the agent is installed. `icon` names a logo in
 // assets/agent-icons (see tool/make_agent_icons.swift); null shows the
-// agent's initial instead.
+// agent's initial instead. `project` is the folder, relative to a
+// project's root, the agent reads project skills from, where it differs
+// from `dir`.
 
 class AgentDefinition {
-  const AgentDefinition({required this.key, required this.label, required this.dir, required this.detect, this.icon});
+  const AgentDefinition({
+    required this.key,
+    required this.label,
+    required this.dir,
+    required this.detect,
+    this.icon,
+    this.project,
+  });
 
   final String key;
   final String label;
   final String dir;
   final String detect;
   final String? icon;
+  final String? project;
+
+  // Where project skills go: `project`, else the home folder's layout. An
+  // agent configured under ~/.config has no project layout the cabinet
+  // knows, so it gets none.
+  String? get projectDir => project ?? (dir.startsWith('.config/') ? null : dir);
 }
 
 const agentCatalog = <AgentDefinition>[
   AgentDefinition(key: 'adal', label: 'AdaL', dir: '.adal/skills', detect: '.adal', icon: 'adal'),
-  AgentDefinition(key: 'amp', label: 'Amp', dir: '.config/agents/skills', detect: '.config/agents', icon: 'amp'),
+  AgentDefinition(
+    key: 'amp',
+    label: 'Amp',
+    dir: '.config/agents/skills',
+    detect: '.config/agents',
+    icon: 'amp',
+    project: '.agents/skills',
+  ),
   AgentDefinition(
     key: 'antigravity',
     label: 'Antigravity',
     dir: '.gemini/antigravity/skills',
     detect: '.gemini/antigravity',
     icon: 'antigravity',
+    project: '.agent/skills',
   ),
   AgentDefinition(key: 'augment', label: 'Augment', dir: '.augment/skills', detect: '.augment', icon: 'augment'),
   AgentDefinition(key: 'autoclaw', label: 'AutoClaw', dir: '.openclaw-autoclaw/skills', detect: '.openclaw-autoclaw'),
@@ -35,7 +58,14 @@ const agentCatalog = <AgentDefinition>[
     detect: '.codebuddy',
     icon: 'codebuddy',
   ),
-  AgentDefinition(key: 'codex', label: 'Codex', dir: '.codex/skills', detect: '.codex', icon: 'codex'),
+  AgentDefinition(
+    key: 'codex',
+    label: 'Codex',
+    dir: '.codex/skills',
+    detect: '.codex',
+    icon: 'codex',
+    project: '.agents/skills',
+  ),
   AgentDefinition(
     key: 'command_code',
     label: 'Command Code',
@@ -83,6 +113,7 @@ const agentCatalog = <AgentDefinition>[
     dir: '.copilot/skills',
     detect: '.copilot',
     icon: 'github_copilot',
+    project: '.github/skills',
   ),
   AgentDefinition(
     key: 'gitlab_duo',
@@ -125,6 +156,7 @@ const agentCatalog = <AgentDefinition>[
     dir: '.config/opencode/skills',
     detect: '.config/opencode',
     icon: 'opencode',
+    project: '.opencode/skills',
   ),
   AgentDefinition(
     key: 'openhands',
@@ -133,12 +165,26 @@ const agentCatalog = <AgentDefinition>[
     detect: '.openhands',
     icon: 'openhands',
   ),
-  AgentDefinition(key: 'pi', label: 'Pi', dir: '.pi/agent/skills', detect: '.pi/agent', icon: 'pi'),
+  AgentDefinition(
+    key: 'pi',
+    label: 'Pi',
+    dir: '.pi/agent/skills',
+    detect: '.pi/agent',
+    icon: 'pi',
+    project: '.pi/skills',
+  ),
   AgentDefinition(key: 'pochi', label: 'Pochi', dir: '.pochi/skills', detect: '.pochi', icon: 'pochi'),
   AgentDefinition(key: 'qclaw', label: 'QClaw', dir: '.qclaw/skills', detect: '.qclaw'),
   AgentDefinition(key: 'qoder', label: 'Qoder', dir: '.qoder/skills', detect: '.qoder', icon: 'qoder'),
   AgentDefinition(key: 'qwen_code', label: 'Qwen Code', dir: '.qwen/skills', detect: '.qwen', icon: 'qwen_code'),
-  AgentDefinition(key: 'replit', label: 'Replit', dir: '.config/agents/skills', detect: '.replit', icon: 'replit'),
+  AgentDefinition(
+    key: 'replit',
+    label: 'Replit',
+    dir: '.config/agents/skills',
+    detect: '.replit',
+    icon: 'replit',
+    project: '.agents/skills',
+  ),
   AgentDefinition(key: 'roo_code', label: 'Roo Code', dir: '.roo/skills', detect: '.roo', icon: 'roo_code'),
   AgentDefinition(key: 'trae_cn', label: 'TRAE CN', dir: '.trae-cn/skills', detect: '.trae-cn', icon: 'trae-cn'),
   AgentDefinition(key: 'trae', label: 'TRAE IDE', dir: '.trae/skills', detect: '.trae', icon: 'trae'),
@@ -149,6 +195,7 @@ const agentCatalog = <AgentDefinition>[
     dir: '.codeium/windsurf/skills',
     detect: '.codeium/windsurf',
     icon: 'windsurf',
+    project: '.windsurf/skills',
   ),
   AgentDefinition(
     key: 'workbuddy',

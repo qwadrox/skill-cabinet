@@ -110,6 +110,25 @@ void main() {
     });
     controller.selectAll();
     await shot('broken-dark', mode: ThemeMode.dark);
+    // Projects: the overview, one project, and a set's reach.
+    // Project logos are files; decode them with real I/O before the shots.
+    final element = tester.element(find.byType(SkillPane));
+    await tester.runAsync(() async {
+      for (final project in controller.discoveredProjects) {
+        final icon = project.icon;
+        if (icon != null && !icon.endsWith('.svg')) await precacheImage(FileImage(File(icon)), element);
+      }
+    });
+    controller.selectProjects();
+    await shot('projects-dark', mode: ThemeMode.dark);
+    await shot('projects-light');
+    final first = controller.discoveredProjects.first.path;
+    controller.selectProject(first);
+    await shot('project-dark', mode: ThemeMode.dark);
+    controller.selectSet('Blog');
+    await shot('set-reach-dark', mode: ThemeMode.dark);
+    controller.selectAll();
+    await shot('sidebar-projects-dark', mode: ThemeMode.dark);
     // The agents sheet over the window.
     showAgentsSheet(tester.element(find.byType(SkillPane)));
     await tester.pumpAndSettle();

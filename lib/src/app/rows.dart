@@ -6,6 +6,7 @@ import '../domain/deployment.dart';
 import '../domain/health.dart';
 import '../domain/git_import.dart';
 import '../domain/library.dart';
+import '../domain/projects.dart';
 import 'cabinet_controller.dart';
 
 class SkillRow {
@@ -66,8 +67,7 @@ class PaneSetHeader extends PaneEntry {
 
   // While a search hides members, the header says how many of them are
   // left, so the count can never disagree with the rows beneath it.
-  String get countLabel =>
-      matching == total ? '$total skill${total == 1 ? '' : 's'}' : '$matching of $total skills';
+  String get countLabel => matching == total ? '$total skill${total == 1 ? '' : 's'}' : '$matching of $total skills';
 }
 
 class PaneSkill extends PaneEntry {
@@ -85,6 +85,7 @@ class SetRow {
     required this.active,
     required this.enabled,
     required this.current,
+    required this.projects,
   });
 
   final SkillSet set;
@@ -94,6 +95,52 @@ class SetRow {
   final int active;
   final bool enabled;
   final bool current;
+  // Projects the set is on for.
+  final int projects;
+}
+
+// A project: what was found about its folder, joined with the sets the
+// deployment gives it.
+class ProjectRow {
+  const ProjectRow({
+    required this.path,
+    required this.name,
+    required this.display,
+    required this.sets,
+    required this.linked,
+    required this.exists,
+    required this.listed,
+    this.icon,
+    this.activity,
+    this.sources = const [],
+  });
+
+  final String path;
+  final String name;
+  final String display;
+  // Skill sets on for the project, in sidebar order.
+  final List<SkillSet> sets;
+  final int linked;
+  final bool exists;
+  // The deployment has an entry for it (sets, or added by hand).
+  final bool listed;
+  final String? icon;
+  final DateTime? activity;
+  final List<String> sources;
+
+  bool hasSet(String name) => sets.any((s) => s.name == name);
+}
+
+// One set in a project's view.
+class ProjectSetRow {
+  const ProjectSetRow({required this.set, required this.total, required this.enabled, required this.globalFor});
+
+  final SkillSet set;
+  final int total;
+  // On for the project.
+  final bool enabled;
+  // Enabled agents that have the whole set everywhere already.
+  final List<String> globalFor;
 }
 
 extension CabinetRows on CabinetController {
@@ -197,6 +244,93 @@ extension CabinetRows on CabinetController {
           active: rows.where((r) => set.has(r.name) && r.active).length,
           enabled: agent?.hasSet(set.name) ?? false,
           current: set.name == current,
+          projects: deployment.projects.where((p) => p.hasSet(set.name)).length,
+        ),
+    ];
+  }
+
+  // ---- projects -------------------------------------------------------------
+
+  ProjectRow _projectRow(String path, ProjectInfo? info) {
+    final assignment = deployment.project(path);
+    final on = assignment?.sets ?? const <String>[];
+    return ProjectRow(
+      path: path,
+      name: info?.name ?? path.split('/').where((part) => part.isNotEmpty).lastOrNull ?? path,
+      display: info?.display ?? assignment?.display ?? path,
+      sets: [
+        for (final set in collections.sets)
+          if (on.contains(set.name)) set,
+      ],
+      linked: assignment?.linked ?? 0,
+      exists: assignment?.exists ?? true,
+      listed: assignment != null,
+      icon: info?.icon,
+      activity: info?.activity,
+      sources: info?.sources ?? const [],
+    );
+  }
+
+  // Every project: found ones by recent activity, then listed ones whose
+  // folder could not be described (moved or deleted).
+  List<ProjectRow> get allProjectRows {
+    final found = {for (final info in discoveredProjects) info.path: info};
+    return [
+      for (final info in discoveredProjects) _projectRow(info.path, info),
+      for (final project in deployment.projects)
+        if (!found.containsKey(project.path)) _projectRow(project.path, null),
+    ];
+  }
+
+  // The overview: projects with sets first, the search applied.
+  List<ProjectRow> get projectRows {
+    final query = search.trim().toLowerCase();
+    final rows = allProjectRows
+        .where((r) => query.isEmpty || r.name.toLowerCase().contains(query) || r.display.toLowerCase().contains(query))
+        .toList();
+    return [...rows.where((r) => r.sets.isNotEmpty), ...rows.where((r) => r.sets.isEmpty)];
+  }
+
+  // Projects with at least one set on, for the sidebar.
+  List<ProjectRow> get activeProjectRows => [
+    for (final project in deployment.projects)
+      if (project.sets.isNotEmpty) _projectRow(project.path, _info(project.path)),
+  ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+  ProjectInfo? _info(String path) {
+    for (final info in discoveredProjects) {
+      if (info.path == path) return info;
+    }
+    return null;
+  }
+
+  ProjectRow? get selectedProject {
+    final path = selectedProjectPath;
+    if (path == null) return null;
+    final info = _info(path);
+    if (info == null && deployment.project(path) == null) return null;
+    return _projectRow(path, info);
+  }
+
+  List<ProjectRow> projectsWithSet(String name) => [
+    for (final row in allProjectRows)
+      if (row.hasSet(name)) row,
+  ];
+
+  // The selected project's sets, with the agents that have them globally.
+  List<ProjectSetRow> get projectSetRows {
+    final project = selectedProject;
+    final agents = deployment.agents.where((a) => a.enabled).toList();
+    return [
+      for (final set in collections.sets)
+        ProjectSetRow(
+          set: set,
+          total: _total(set),
+          enabled: project?.hasSet(set.name) ?? false,
+          globalFor: [
+            for (final a in agents)
+              if (a.hasSet(set.name)) a.label,
+          ],
         ),
     ];
   }

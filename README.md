@@ -20,6 +20,7 @@ AI agent skills are often scattered across several hidden folders. Skill Cabinet
 - Import existing skill folders that contain a `SKILL.md` file, or select skills from an HTTPS/SSH Git repository.
 - Group related skills into collections such as *Writing*, *Research*, or *Development*.
 - Turn collections or individual skills on and off for each agent.
+- Turn collections on for a single project instead of everywhere. Projects are found in bb, Claude Code and Codex, or added by hand.
 - Keep agent skill folders synchronized with links managed by the cabinet.
 - Track Git-imported skills, review file changes against your local copy, and update selected skills in place.
 - Discover new skills in tracked repositories, then import or dismiss them from the update manager.
@@ -29,6 +30,12 @@ AI agent skills are often scattered across several hidden folders. Skill Cabinet
 ## How it works
 
 The cabinet stores the original skill folders in `~/.skill-cabinet` and links enabled skills into each agent's skill directory. Your existing folders are left alone unless you explicitly import them.
+
+## Skills per project
+
+Open **Projects** in the sidebar to see the Git repositories you work in, found in bb, Claude Code (`~/.claude.json`) and Codex (`~/.codex/config.toml`, plus the Codex app's projects and thread folders), ordered by recent activity. You can also add any folder by hand with **+** or by dropping it on the Projects view. Open a project and turn on the skill sets it should get. The set is then linked into the project's own skills folders, such as `.claude/skills` for Claude Code and `.agents/skills` for Codex, for every enabled agent. Your agents see the set only while they work in that project. To keep a set out of everywhere else, turn its global switch off in the sidebar.
+
+A set's page shows where it is on: globally for which agents, and for which projects. The project links are listed in the repository's local `.git/info/exclude`, so they never appear as changes. Skills the project already has in those folders are left alone. Turning the last set off removes the links and any skills folder the cabinet emptied.
 
 ## Getting started on macOS
 
@@ -115,7 +122,7 @@ Skill Cabinet stores its data locally:
 ```text
 ~/.skill-cabinet/skills/          imported skills
 ~/.skill-cabinet/collections.json collections and membership
-~/.skill-cabinet/deployment.json  agents and assignments
+~/.skill-cabinet/deployment.json  agents, assignments and project sets
 ~/.skill-cabinet/git_sources.json tracked Git repository sources
 ~/.skill-cabinet/git_repositories.json seen skills and pending discoveries per repository/branch
 ~/.skill-cabinet/.git/            backup history

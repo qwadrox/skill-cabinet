@@ -9,6 +9,7 @@ import '../domain/health.dart';
 import '../domain/notice.dart';
 import 'dialogs.dart';
 import 'git_updates_sheet.dart';
+import 'projects_pane.dart';
 import 'scope.dart';
 import 'style.dart';
 import 'widgets.dart';
@@ -36,7 +37,7 @@ class SkillPane extends StatelessWidget {
           alignment: Alignment.topCenter,
           child: controller.notice.isEmpty
               ? const SizedBox(width: double.infinity)
-              : _NoticeBanner(
+              : NoticeBanner(
                   controller.notice,
                   onDismiss: controller.dismissNotice,
                   onReviewUpdates: updates == 0 && controller.newGitSkills == 0
@@ -96,7 +97,7 @@ class SkillPane extends StatelessWidget {
       ];
     }
 
-    final widgets = <Widget>[];
+    final widgets = <Widget>[if (set != null) SetReach(set: set.name)];
     if (entries.isEmpty) {
       if (controller.searching) {
         widgets.add(
@@ -203,8 +204,8 @@ class SkillPane extends StatelessWidget {
   }
 }
 
-class _NoticeBanner extends StatelessWidget {
-  const _NoticeBanner(this.notice, {required this.onDismiss, this.onReviewUpdates});
+class NoticeBanner extends StatelessWidget {
+  const NoticeBanner(this.notice, {super.key, required this.onDismiss, this.onReviewUpdates});
 
   final Notice notice;
   final VoidCallback onDismiss;
