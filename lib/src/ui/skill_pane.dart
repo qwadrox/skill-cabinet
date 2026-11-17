@@ -122,6 +122,7 @@ class SkillPane extends StatelessWidget {
       widgets.add(switch (entry) {
         PaneLabel(:final text) => SectionLabel(text.toUpperCase()),
         PaneSetHeader() => _SetHeader(entry),
+        PaneRepoHeader() => _RepoHeader(entry),
         PaneSkill(:final row, :final nested) => _SkillTile(row, nested: nested, inSetView: set != null),
       });
     }
@@ -306,6 +307,48 @@ class _SetHeader extends StatelessWidget {
                   onChanged: (on) => controller.setSetEnabled(set.name, on),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// A Git repository's header among the skills in no set.
+class _RepoHeader extends StatelessWidget {
+  const _RepoHeader(this.entry);
+
+  final PaneRepoHeader entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = CabinetScope.read(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 1),
+      child: HoverRow(
+        semanticLabel: entry.label,
+        onPressed: () => controller.toggleRepoSection(entry.sourceUrl),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        builder: (context, _) => Row(
+          children: [
+            AnimatedRotation(
+              turns: entry.expanded ? 0.25 : 0,
+              duration: const Duration(milliseconds: 150),
+              child: MacosIcon(CupertinoIcons.chevron_right, size: 11, color: context.secondaryLabel),
+            ),
+            const SizedBox(width: 10),
+            MacosIcon(CupertinoIcons.cloud, size: 13, color: context.secondaryLabel),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                entry.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.body.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(entry.countLabel, style: context.caption),
           ],
         ),
       ),

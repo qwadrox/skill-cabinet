@@ -286,3 +286,10 @@ class GitImportResult {
   final LibraryImportResult library;
   final int sourcesSaved;
 }
+
+// owner/repo of a Git URL, for headings.
+String repositoryLabel(String url) {
+  final path = url.startsWith('git@') ? url.split(':').last : Uri.tryParse(url)?.path ?? url;
+  final parts = path.split('/').where((part) => part.isNotEmpty).toList();
+  return (parts.length > 1 ? parts.sublist(parts.length - 2).join('/') : path).replaceFirst(RegExp(r'\.git$'), '');
+}

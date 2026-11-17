@@ -37,7 +37,8 @@ class SkillRow {
 
 // A row of the skill pane. The "All skills" view is sectioned: skills in
 // no set first, then one collapsible header per set followed by its
-// members while it is expanded.
+// members while it is expanded. Among the skills in no set, two or more
+// from one Git repository fold under a collapsible repository header.
 sealed class PaneEntry {
   const PaneEntry();
 }
@@ -68,6 +69,23 @@ class PaneSetHeader extends PaneEntry {
   // While a search hides members, the header says how many of them are
   // left, so the count can never disagree with the rows beneath it.
   String get countLabel => matching == total ? '$total skill${total == 1 ? '' : 's'}' : '$matching of $total skills';
+}
+
+// Skills in no set that came from one Git repository, folded under one
+// header so a large repository does not bury the rest of the list.
+class PaneRepoHeader extends PaneEntry {
+  const PaneRepoHeader({required this.sourceUrl, required this.total, required this.matching, required this.expanded});
+
+  final String sourceUrl;
+  // Skills from it in no set.
+  final int total;
+  // Those of them the search left, listed under the header.
+  final int matching;
+  final bool expanded;
+
+  String get label => repositoryLabel(sourceUrl);
+
+  String get countLabel => matching == total ? '$total skills' : '$matching of $total skills';
 }
 
 class PaneSkill extends PaneEntry {
@@ -185,10 +203,36 @@ extension CabinetRows on CabinetController {
     if (selectedSet != null) return [for (final r in rows) PaneSkill(r)];
     final agent = selectedAgent;
     final loose = rows.where((r) => !r.inSet).toList();
+    // Counted before the search, so a search cannot turn a group back
+    // into loose rows.
+    final perRepo = <String, int>{};
+    for (final skill in library.skills) {
+      final url = gitSources[skill.name]?.sourceUrl;
+      if (url != null && !collections.sets.any((s) => s.has(skill.name))) {
+        perRepo[url] = (perRepo[url] ?? 0) + 1;
+      }
+    }
+    String? groupOf(SkillRow r) {
+      final url = r.gitSource?.sourceUrl;
+      return url != null && (perRepo[url] ?? 0) > 1 ? url : null;
+    }
+
+    final groups = <String, List<SkillRow>>{};
+    for (final r in loose) {
+      if (groupOf(r) case final url?) groups.putIfAbsent(url, () => []).add(r);
+    }
+    final repos = groups.keys.toList()..sort((a, b) => repositoryLabel(a).compareTo(repositoryLabel(b)));
     final entries = <PaneEntry>[
       if (loose.isNotEmpty && loose.length < rows.length) const PaneLabel('Not in a skill set'),
-      for (final r in loose) PaneSkill(r),
+      for (final r in loose)
+        if (groupOf(r) == null) PaneSkill(r),
     ];
+    for (final url in repos) {
+      final members = groups[url]!;
+      final expanded = searching || expandedRepos.contains(url);
+      entries.add(PaneRepoHeader(sourceUrl: url, total: perRepo[url]!, matching: members.length, expanded: expanded));
+      if (expanded) entries.addAll([for (final r in members) PaneSkill(r, nested: true)]);
+    }
     for (final set in collections.sets) {
       final members = rows.where((r) => set.has(r.name)).toList();
       if (members.isEmpty) continue;

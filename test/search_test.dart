@@ -4,13 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:skill_cabinet/src/app/cabinet_controller.dart';
 import 'package:skill_cabinet/src/app/rows.dart';
+import 'package:skill_cabinet/src/domain/git_import.dart';
 import 'package:skill_cabinet/src/services/cabinet_paths.dart';
 
 void writeSkill(String dir, String name, {String description = ''}) {
   final folder = Directory(p.join(dir, name))..createSync(recursive: true);
-  File(
-    p.join(folder.path, 'SKILL.md'),
-  ).writeAsStringSync('---\nname: $name\ndescription: $description\n---\n# Body\n');
+  File(p.join(folder.path, 'SKILL.md')).writeAsStringSync('---\nname: $name\ndescription: $description\n---\n# Body\n');
 }
 
 void main() {
@@ -105,5 +104,40 @@ void main() {
     controller.searchField.text = 'alpha';
     expect(header().countLabel, '1 of 2 skills');
     expect(header().expanded, isTrue);
+  });
+
+  GitSourceRecord source(String skill, String url) =>
+      GitSourceRecord(skillName: skill, sourceUrl: url, ref: 'main', repositoryPath: 'skills/$skill', revision: 'abc');
+
+  test('skills in no set from one repository fold under its header', () async {
+    const repo = 'https://github.com/someone/pack';
+    writeSkill(CabinetPaths(home.path).storeDir, 'epsilon');
+    writeSkill(CabinetPaths(home.path).storeDir, 'zeta');
+    await controller.refresh();
+    controller.gitSources = {
+      'gamma': source('gamma', repo),
+      'epsilon': source('epsilon', repo),
+      // Alone from its repository, so it stays a plain row.
+      'zeta': source('zeta', 'https://github.com/other/single'),
+      // In a set, so it is listed under the set instead.
+      'alpha': source('alpha', repo),
+    };
+    List<String> loose() => [
+      for (final e in controller.paneEntries.takeWhile((e) => e is! PaneSetHeader))
+        switch (e) {
+          PaneLabel(:final text) => 'label:$text',
+          PaneRepoHeader(:final label, :final countLabel) => 'repo:$label $countLabel',
+          PaneSkill(:final row) => row.name,
+          PaneSetHeader() => 'set',
+        },
+    ];
+    expect(loose(), ['label:Not in a skill set', 'zeta', 'repo:someone/pack 2 skills']);
+
+    controller.toggleRepoSection(repo);
+    expect(loose(), ['label:Not in a skill set', 'zeta', 'repo:someone/pack 2 skills', 'epsilon', 'gamma']);
+
+    controller.toggleRepoSection(repo);
+    controller.searchField.text = 'gamma';
+    expect(loose(), ['repo:someone/pack 1 of 2 skills', 'gamma']);
   });
 }

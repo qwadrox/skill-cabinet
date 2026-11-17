@@ -69,6 +69,8 @@ class CabinetController extends ChangeNotifier {
   bool looseOnly = false;
   // Skill sets opened in the sectioned "All skills" view.
   final Set<String> expandedSets = {};
+  // Repositories opened among the skills in no set, by source URL.
+  final Set<String> expandedRepos = {};
   // The skill whose SKILL.md is shown beside the list, and its contents
   // once read (null while loading, never another skill's).
   String? previewName;
@@ -289,6 +291,11 @@ class CabinetController extends ChangeNotifier {
 
   void toggleSection(String set) {
     if (!expandedSets.remove(set)) expandedSets.add(set);
+    notifyListeners();
+  }
+
+  void toggleRepoSection(String sourceUrl) {
+    if (!expandedRepos.remove(sourceUrl)) expandedRepos.add(sourceUrl);
     notifyListeners();
   }
 

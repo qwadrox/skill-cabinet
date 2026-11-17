@@ -99,6 +99,12 @@ void main() {
 
     await shot('all-light');
     await shot('all-dark', mode: ThemeMode.dark);
+    final repo = controller.paneEntries.whereType<PaneRepoHeader>().firstOrNull;
+    if (repo != null) {
+      controller.toggleRepoSection(repo.sourceUrl);
+      await shot('repo-open-dark', mode: ThemeMode.dark);
+      controller.toggleRepoSection(repo.sourceUrl);
+    }
     controller.toggleSection('Web');
     await tester.runAsync(() async {
       controller.togglePreview('frontend-design');

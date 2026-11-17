@@ -379,12 +379,6 @@ List<List<GitSourceRecord>> _groupByRepository(Iterable<GitSourceRecord> sources
   return result;
 }
 
-String _repositoryLabel(String url) {
-  final path = url.startsWith('git@') ? url.split(':').last : Uri.tryParse(url)?.path ?? url;
-  final parts = path.split('/').where((part) => part.isNotEmpty).toList();
-  return (parts.length > 1 ? parts.sublist(parts.length - 2).join('/') : path).replaceFirst(RegExp(r'\.git$'), '');
-}
-
 class _RepositoryGroupCard extends StatelessWidget {
   const _RepositoryGroupCard({
     required this.sources,
@@ -456,7 +450,7 @@ class _RepositoryGroupCard extends StatelessWidget {
                   child: MacosTooltip(
                     message: '$sourceUrl\n$ref',
                     child: Text(
-                      _repositoryLabel(sourceUrl),
+                      repositoryLabel(sourceUrl),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: context.mono.copyWith(color: context.secondaryLabel),
