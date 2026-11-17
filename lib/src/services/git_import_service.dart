@@ -28,8 +28,6 @@ class GitImportService {
   static const _git = '/usr/bin/git';
   static const _tempPrefix = 'skill-cabinet-git-';
   static const maxCandidates = 200;
-  static const maxFilesPerSkill = 500;
-  static const maxBytesPerSkill = 50 * 1024 * 1024;
 
   final CabinetPaths paths;
 
@@ -643,9 +641,6 @@ class GitImportService {
   }
 
   void _copyTreeSafe(String source, String destination) {
-    var files = 0;
-    var bytes = 0;
-
     void copy(String from, String to) {
       Directory(to).createSync(recursive: true);
       for (final entity in Directory(from).listSync(followLinks: false)) {
@@ -656,10 +651,6 @@ class GitImportService {
           case FileSystemEntityType.directory:
             copy(entity.path, target);
           case FileSystemEntityType.file:
-            files++;
-            bytes += File(entity.path).lengthSync();
-            if (files > maxFilesPerSkill) throw const GitImportException('A selected skill contains too many files');
-            if (bytes > maxBytesPerSkill) throw const GitImportException('A selected skill is too large to import');
             File(entity.path).copySync(target);
           case FileSystemEntityType.link:
             throw const GitImportException('Symlinks inside skills are not supported');
@@ -676,19 +667,11 @@ class GitImportService {
   }
 
   String? _blockedReason(String directory) {
-    var files = 0;
-    var bytes = 0;
     try {
       for (final entity in Directory(directory).listSync(recursive: true, followLinks: false)) {
         if (p.basename(entity.path) == '.git' || entity.path.contains('${p.separator}.git${p.separator}')) continue;
         final type = FileSystemEntity.typeSync(entity.path, followLinks: false);
         if (type == FileSystemEntityType.link) return 'Symlinks are not supported';
-        if (type == FileSystemEntityType.file) {
-          files++;
-          bytes += File(entity.path).lengthSync();
-          if (files > maxFilesPerSkill) return 'Too many files';
-          if (bytes > maxBytesPerSkill) return 'Skill is larger than 50 MB';
-        }
       }
       return null;
     } catch (_) {

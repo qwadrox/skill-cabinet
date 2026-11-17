@@ -58,13 +58,109 @@ Future<bool> _confirm(
 
 Future<void> confirmDeleteSet(BuildContext context, String name) async {
   final controller = CabinetScope.read(context);
-  final ok = await _confirm(
-    context,
-    title: 'Delete skill set “$name”?',
-    message: 'The skills stay in the library. Only the skill set is removed.',
-    action: 'Delete',
+  final skills = controller.skillsOnlyIn(name);
+  final shared = (controller.collections.named(name)?.skills.length ?? 0) - skills.length;
+  final choice = await showAppModal<_DeleteSetChoice>(
+    context: context,
+    builder: (_) => AppDialogCard(
+      width: 360,
+      child: _DeleteSetDialog(name: name, skillCount: skills.length, sharedCount: shared),
+    ),
   );
-  if (ok) await controller.deleteSet(name);
+  switch (choice) {
+    case _DeleteSetChoice.setOnly:
+      await controller.deleteSet(name);
+    case _DeleteSetChoice.withSkills:
+      await controller.deleteSetWithSkills(name);
+    case null:
+  }
+}
+
+enum _DeleteSetChoice { setOnly, withSkills }
+
+class _DeleteSetDialog extends StatefulWidget {
+  const _DeleteSetDialog({required this.name, required this.skillCount, required this.sharedCount});
+
+  final String name;
+  // Skills only this set holds, and the ones other sets hold too.
+  final int skillCount;
+  final int sharedCount;
+
+  @override
+  State<_DeleteSetDialog> createState() => _DeleteSetDialogState();
+}
+
+class _DeleteSetDialogState extends State<_DeleteSetDialog> {
+  bool _withSkills = false;
+
+  String get _message {
+    if (!_withSkills) return 'The skills stay in the library. Only the skill set is removed.';
+    final kept = widget.sharedCount > 0
+        ? ' ${widget.sharedCount} skill${widget.sharedCount == 1 ? '' : 's'} in other sets too will stay.'
+        : '';
+    return 'Its skills are deleted from the library and every agent, and their Git tracking stops.$kept';
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+        child: Column(
+          children: [
+            Image.asset('assets/app-icon.png', width: 52, height: 52),
+            const SizedBox(height: 14),
+            Text(
+              'Delete skill set “${widget.name}”?',
+              textAlign: TextAlign.center,
+              style: context.macos.typography.headline,
+            ),
+            const SizedBox(height: 6),
+            Text(_message, textAlign: TextAlign.center, style: context.caption.copyWith(fontSize: 12)),
+            if (widget.skillCount > 0) ...[
+              const SizedBox(height: 14),
+              GestureDetector(
+                onTap: () => setState(() => _withSkills = !_withSkills),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    MacosCheckbox(value: _withSkills, onChanged: (value) => setState(() => _withSkills = value)),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Also delete its ${widget.skillCount} skill${widget.skillCount == 1 ? '' : 's'}',
+                      style: context.body,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+      AppDialogActions(
+        children: [
+          Expanded(
+            child: PushButton(
+              controlSize: ControlSize.large,
+              secondary: true,
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: DangerButton(
+              label: 'Delete',
+              onPressed: () =>
+                  Navigator.of(context).pop(_withSkills ? _DeleteSetChoice.withSkills : _DeleteSetChoice.setOnly),
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
 }
 
 Future<void> renameSetDialog(BuildContext context, String name) async {

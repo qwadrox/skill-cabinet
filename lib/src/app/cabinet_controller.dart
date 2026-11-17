@@ -557,6 +557,29 @@ class CabinetController extends ChangeNotifier {
     await _backend.deleteSet(name).then(_collectionsLoaded, onError: _failed);
   }
 
+  // Skills of a set that no other set holds: the ones deleting the set
+  // together with its skills removes from the library.
+  List<String> skillsOnlyIn(String setName) {
+    final set = collections.named(setName);
+    if (set == null) return const [];
+    final inLibrary = {for (final skill in library.skills) skill.name};
+    return [
+      for (final skill in set.skills)
+        if (inLibrary.contains(skill) && !collections.sets.any((other) => other.name != setName && other.has(skill)))
+          skill,
+    ];
+  }
+
+  // Deletes the set, then each of its skills no other set holds, which also
+  // clears their Git tracking and agent links.
+  Future<void> deleteSetWithSkills(String name) async {
+    final skills = skillsOnlyIn(name);
+    await deleteSet(name);
+    for (final skill in skills) {
+      await deleteSkill(skill);
+    }
+  }
+
   Future<void> renameSet(String oldName, String rawName) async {
     final name = rawName.trim();
     if (name.isEmpty || name == oldName) return;
