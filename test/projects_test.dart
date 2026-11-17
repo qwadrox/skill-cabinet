@@ -93,6 +93,17 @@ void main() {
     expect(exclude(), before);
   });
 
+  test('turning a set off clears Finder’s .DS_Store but keeps other hidden files', () {
+    final d = DeploymentService(paths)..sync();
+    d.setProjectSet(project, 'Blog', enabled: true);
+    File(p.join(project, '.claude/skills/.DS_Store')).writeAsStringSync('x');
+    File(p.join(project, '.claude/.DS_Store')).writeAsStringSync('x');
+    File(p.join(project, '.agents/skills/.keep')).writeAsStringSync('');
+    d.setProjectSet(project, 'Blog', enabled: false);
+    expect(exists(p.join(project, '.claude')), isFalse);
+    expect(File(p.join(project, '.agents/skills/.keep')).existsSync(), isTrue);
+  });
+
   test('keeps the project’s own skills and folders', () {
     writeSkill(p.join(project, '.claude/skills'), 'own');
     writeSkill(p.join(project, '.claude/skills'), 'blog-writer');

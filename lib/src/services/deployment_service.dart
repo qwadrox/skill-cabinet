@@ -663,11 +663,22 @@ class DeploymentService {
     _writeExclude(root, linked..sort());
   }
 
+  // Finder's .DS_Store does not count as content; any other entry,
+  // hidden ones included, keeps the folder.
   void _removeIfEmpty(String dir, String root) {
     var current = dir;
     while (current != root && p.isWithin(root, current)) {
-      if (!FileSystemEntity.isDirectorySync(current) || listDir(current).isNotEmpty) return;
-      Directory(current).deleteSync();
+      if (entryKind(current) != EntryKind.dir) return;
+      try {
+        final entries = Directory(current).listSync(followLinks: false);
+        if (entries.any((e) => p.basename(e.path) != '.DS_Store')) return;
+        for (final entry in entries) {
+          entry.deleteSync();
+        }
+        Directory(current).deleteSync();
+      } on FileSystemException {
+        return;
+      }
       current = p.dirname(current);
     }
   }
