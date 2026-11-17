@@ -237,4 +237,16 @@ void main() {
     expect(service.repositories(), isEmpty);
     expect((await service.checkForUpdates(force: true)).repositories, isEmpty);
   });
+
+  test('a failed check is retried instead of kept for a day', () async {
+    await importReviewer();
+    await service.checkForUpdates(force: true);
+    final record = GitImportService(paths).sources()['reviewer']!;
+    writeJsonAtomic(paths.gitSourcesFile, {
+      'reviewer': record.withCheck(checkedAt: DateTime.now().toUtc(), error: 'Old failure').toJson(),
+    });
+    final result = await GitImportService(paths).checkForUpdates();
+    expect(result.checked, 1);
+    expect(result.records['reviewer']!.lastCheckError, isNull);
+  });
 }

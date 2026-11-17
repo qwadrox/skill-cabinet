@@ -316,6 +316,8 @@ class GitImportService {
       if (!force &&
           repositories.containsKey('${source.sourceUrl}\u0000${source.ref}') &&
           source.hasContentChanges != null &&
+          // A failed check is retried at once rather than kept for a day.
+          source.lastCheckError == null &&
           source.lastCheckedAt != null &&
           now.difference(source.lastCheckedAt!.toUtc()) < const Duration(hours: 24)) {
         continue;
